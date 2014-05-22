@@ -33,15 +33,20 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     camera: null
     spriteSheetCache: null
     showInvisible: false
+    async: true
 
   possessed: false
   flipped: false
   flippedCount: 0
-  originalScaleX: null
-  originalScaleY: null
   actionQueue: null
   actions: null
   rotation: 0
+
+  # Scale numbers
+  baseScaleX: 1 # scale + flip (for current action) / resolutionFactor.
+  baseScaleY: 1 # These numbers rarely change, so keep them around.
+  scaleFactor: 1 # Current scale adjustment. This can change rapidly.
+  targetScaleFactor: 1 # What the scaleFactor is going toward during a tween.
 
   # ACTION STATE
   # Actions have relations. If you say 'move', 'move_side' may play because of a direction
@@ -71,26 +76,35 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     @ranges = []
     @handledDisplayEvents = {}
     @age = 0
-    @scaleFactor = @targetScaleFactor = 1
+    @stillLoading = true
     if @thangType.isFullyLoaded()
       @setupSprite()
     else
-      @stillLoading = true
       @thangType.fetch()
       @listenToOnce(@thangType, 'sync', @setupSprite)
 
   setupSprite: ->
     for trigger, sounds of @thangType.get('soundTriggers') or {} when trigger isnt 'say'
       AudioPlayer.preloadSoundReference sound for sound in sounds
-    @stillLoading = false
     if @thangType.get('raster')
+      @stillLoading = false
+      @actions = {}
       @isRaster = true
       @setUpRasterImage()
-      @actions = {}
     else
-      @actions = @thangType.getActions()
-      @buildFromSpriteSheet @buildSpriteSheet()
-      @createMarks()
+      result = @buildSpriteSheet()
+      if _.isString result # async build
+        @listenToOnce @thangType,  'build-complete', @setupSprite
+      else
+        @stillLoading = false
+        @actions = @thangType.getActions()
+        @buildFromSpriteSheet result
+        @createMarks()
+
+  finishSetup: ->
+    @updateBaseScale()
+    @scaleFactor = @thang.scaleFactor if @thang?.scaleFactor
+    @update true  # Reflect initial scale and other state
 
   setUpRasterImage: ->
     raster = @thangType.get('raster')
@@ -98,30 +112,20 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     @setImageObject image
     $(image.image).one 'load', => @updateScale?()
     @configureMouse()
-    @originalScaleX = image.scaleX
-    @originalScaleY = image.scaleY
     @imageObject.sprite = @
     @imageObject.layerPriority = @thangType.get 'layerPriority'
     @imageObject.name = @thang?.spriteName or @thangType.get 'name'
     reg = @getOffset 'registration'
     @imageObject.regX = -reg.x
     @imageObject.regY = -reg.y
-    @updateScale()
-
-  destroy: ->
-    mark.destroy() for name, mark of @marks
-    label.destroy() for name, label of @labels
-    p.removeChild @healthBar if p = @healthBar?.parent
-    @imageObject?.off 'animationend', @playNextAction
-    clearInterval @effectInterval if @effectInterval
-    super()
+    @finishSetup()
 
   toString: -> "<CocoSprite: #{@thang?.id}>"
 
   buildSpriteSheet: ->
     options = _.extend @options, @thang?.getSpriteOptions?() ? {}
     options.colorConfig = @options.colorConfig if @options.colorConfig
-    options.async = false
+    options.async = @options.async
     @thangType.getSpriteSheet options
 
   setImageObject: (newImageObject) ->
@@ -135,21 +139,16 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
       sprite = new createjs.Sprite(spriteSheet)
     else
       sprite = new createjs.Shape()
-    sprite.scaleX = sprite.scaleY = 1 / @options.resolutionFactor
-    # temp, until these are re-exported with perspective
-    if @options.camera and @thangType.get('name') in ['Dungeon Floor', 'Indoor Floor', 'Grass', 'Goal Trigger', 'Obstacle']
-      sprite.scaleY *= @options.camera.y2x
 
     @setImageObject sprite
     @addHealthBar()
     @configureMouse()
     # TODO: generalize this later?
-    @originalScaleX = sprite.scaleX
-    @originalScaleY = sprite.scaleY
     @imageObject.sprite = @
     @imageObject.layerPriority = @thangType.get 'layerPriority'
     @imageObject.name = @thang?.spriteName or @thangType.get 'name'
     @imageObject.on 'animationend', @playNextAction
+    @finishSetup()
 
   ##################################################
   # QUEUEING AND PLAYING ACTIONS
@@ -178,6 +177,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     @currentAction = action
     return @hide() unless action.animation or action.container or action.relatedActions
     @show()
+    @updateBaseScale()
     return @updateActionDirection() unless action.animation or action.container
     m = if action.container then "gotoAndStop" else "gotoAndPlay"
     @imageObject.framerate = action.framerate or 20
@@ -251,7 +251,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
           return if @destroyed
           @options.groundLayer.removeChild circle
           delete @handledDisplayEvents[event]
-        
+
   showTextEvents: ->
     return unless @thang?.currentEvents
     for event in @thang.currentEvents
@@ -302,6 +302,18 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     [@imageObject.x, @imageObject.y] = [sup.x, sup.y]
     @lastPos = p1.copy?() or _.clone(p1)
     @hasMoved = true
+    
+  updateBaseScale: ->
+    scale = 1
+    scale = @thangType.get('scale') or 1 if @isRaster
+    scale /= @options.resolutionFactor unless @isRaster
+    @baseScaleX = @baseScaleY = scale
+    @baseScaleX *= -1 if @getActionProp 'flipX'
+    @baseScaleY *= -1 if @getActionProp 'flipY'
+    # temp, until these are re-exported with perspective
+    floors = ['Dungeon Floor', 'Indoor Floor', 'Grass', 'Goal Trigger', 'Obstacle']
+    if @options.camera and @thangType.get('name') in floors
+      @baseScaleY *= @options.camera.y2x
 
   updateScale: ->
     return unless @imageObject
@@ -311,18 +323,17 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
         return unless bounds
         @imageObject.scaleX = @thang.width * Camera.PPM / bounds.width
         @imageObject.scaleY = @thang.height * Camera.PPM * @options.camera.y2x / bounds.height
-        @imageObject.regX ?= 0
-        @imageObject.regX += bounds.width / 2
-        @imageObject.regY ?= 0
-        @imageObject.regY += bounds.height / 2
+        @imageObject.regX = bounds.width / 2
+        @imageObject.regY = bounds.height / 2
 
         unless @thang.spriteName is 'Beam'
           @imageObject.scaleX *= @thangType.get('scale') ? 1
           @imageObject.scaleY *= @thangType.get('scale') ? 1
         [@lastThangWidth, @lastThangHeight] = [@thang.width, @thang.height]
       return
-    scaleX = if @getActionProp 'flipX' then -1 else 1
-    scaleY = if @getActionProp 'flipY' then -1 else 1
+    
+    scaleX = scaleY = 1
+      
     if @thangType.get('name') in ['Arrow', 'Spear']
       # Scales the arrow so it appears longer when flying parallel to horizon.
       # To do that, we convert angle to [0, 90] (mirroring half-planes twice), then make linear function out of it:
@@ -337,17 +348,12 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
       angle = 180 - angle if angle > 90
       scaleX = 0.5 + 0.5 * (90 - angle) / 90
 
-    if @isRaster # scale is worked into building the sprite sheet for animations
-      scale = @thangType.get('scale') or 1
-      scaleX *= scale
-      scaleY *= scale
+#    console.error "No thang for", @ unless @thang
+    # TODO: support using scaleFactorX/Y from the thang object
+    @imageObject.scaleX = @baseScaleX * @scaleFactor * scaleX
+    @imageObject.scaleY = @baseScaleY * @scaleFactor * scaleY
 
-    scaleFactorX = @thang.scaleFactorX ? @scaleFactor
-    scaleFactorY = @thang.scaleFactorY ? @scaleFactor
-    @imageObject.scaleX = @originalScaleX * scaleX * scaleFactorX
-    @imageObject.scaleY = @originalScaleY * scaleY * scaleFactorY
-
-    if (@thang.scaleFactor or 1) isnt @targetScaleFactor
+    if @thang and (@thang.scaleFactor or 1) isnt @targetScaleFactor
       createjs.Tween.removeTweens(@)
       createjs.Tween.get(@).to({scaleFactor:@thang.scaleFactor or 1}, 2000, createjs.Ease.elasticOut)
       @targetScaleFactor = @thang.scaleFactor or 1
@@ -676,6 +682,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
   updateGold: ->
     # TODO: eventually this should be moved into some sort of team-based update
     # rather than an each-thang-that-shows-gold-per-team thing.
+    return unless @thang
     return if @thang.gold is @lastGold
     gold = Math.floor @thang.gold
     if @thang.world.age is 0
@@ -751,7 +758,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
 
     endFunc = =>
       @lastTween = null
-      @imageObject.gotoAndPlay(endAnimation)
+      @imageObject.gotoAndPlay(endAnimation) unless @stillLoading
       @shadow.action = 'idle'
       @update true
       @possessed = false
@@ -777,3 +784,11 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     return unless @healthBar
     @healthBar.x = @imageObject.x
     @healthBar.y = @imageObject.y
+
+  destroy: ->
+    mark.destroy() for name, mark of @marks
+    label.destroy() for name, label of @labels
+    p.removeChild @healthBar if p = @healthBar?.parent
+    @imageObject?.off 'animationend', @playNextAction
+    clearInterval @effectInterval if @effectInterval
+    super()

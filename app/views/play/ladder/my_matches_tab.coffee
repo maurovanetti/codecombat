@@ -13,6 +13,7 @@ module.exports = class MyMatchesTabView extends CocoView
   constructor: (options, @level, @sessions) ->
     super(options)
     @nameMap = {}
+    @previouslyRankingTeams = {}
     @refreshMatches()
 
   refreshMatches: ->
@@ -25,6 +26,9 @@ module.exports = class MyMatchesTabView extends CocoView
     for session in @sessions.models
       for match in (session.get('matches') or [])
         id = match.opponents[0].userID
+        unless id
+          console.error "Found bad opponent ID in malformed match:", match, "from session", session
+          continue
         ids.push id unless @nameMap[id]
 
     return @finishRendering() unless ids.length
@@ -34,7 +38,7 @@ module.exports = class MyMatchesTabView extends CocoView
       for session in @sessions.models
         for match in session.get('matches') or []
           opponent = match.opponents[0]
-          @nameMap[opponent.userID] ?= nameMap[opponent.userID].name
+          @nameMap[opponent.userID] ?= nameMap[opponent.userID]?.name ? "<bad match data>"
       @finishRendering()
 
     $.ajax('/db/user/-/names', {
@@ -58,6 +62,9 @@ module.exports = class MyMatchesTabView extends CocoView
       state = 'win'
       state = 'loss' if match.metrics.rank > opponent.metrics.rank
       state = 'tie' if match.metrics.rank is opponent.metrics.rank
+      fresh = match.date > (new Date(new Date() - 20 * 1000)).toISOString()
+      if fresh
+        Backbone.Mediator.publish 'play-sound', trigger: 'chat_received'
       {
         state: state
         opponentName: @nameMap[opponent.userID]
@@ -65,6 +72,7 @@ module.exports = class MyMatchesTabView extends CocoView
         when: moment(match.date).fromNow()
         sessionID: opponent.sessionID
         stale: match.date < submitDate
+        fresh: fresh
       }
 
     for team in @teams
@@ -81,22 +89,28 @@ module.exports = class MyMatchesTabView extends CocoView
       if scoreHistory?.length > 1
         team.scoreHistory = scoreHistory
 
+      if not team.isRanking and @previouslyRankingTeams[team.id]
+        Backbone.Mediator.publish 'play-sound', trigger: 'cast-end'
+      @previouslyRankingTeams[team.id] = team.isRanking
+
     ctx
 
   afterRender: ->
     super()
+    @removeSubView subview for key, subview of @subviews when subview instanceof LadderSubmissionView
     @$el.find('.ladder-submission-view').each (i, el) =>
       placeholder = $(el)
       sessionID = placeholder.data('session-id')
       session = _.find @sessions.models, {id: sessionID}
       ladderSubmissionView = new LadderSubmissionView session: session, level: @level
       @insertSubView ladderSubmissionView, placeholder
-      ladderSubmissionView.$el.find('.rank-button').addClass 'btn-block'
 
     @$el.find('.score-chart-wrapper').each (i, el) =>
       scoreWrapper = $(el)
       team = _.find @teams, name: scoreWrapper.data('team-name')
       @generateScoreLineChart(scoreWrapper.attr('id'), team.scoreHistory, team.name)
+
+    @$el.find('tr.fresh').removeClass('fresh', 5000)
 
   generateScoreLineChart: (wrapperID, scoreHistory,teamName) =>
     margin =

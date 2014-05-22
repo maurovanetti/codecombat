@@ -2,14 +2,14 @@ RootView = require 'views/kinds/RootView'
 Level = require 'models/Level'
 LevelSession = require 'models/LevelSession'
 CocoCollection = require 'collections/CocoCollection'
-{teamDataFromLevel} = require './ladder/utils'
+{teamDataFromLevel} = require './utils'
 {me} = require 'lib/auth'
 application = require 'application'
 
-LadderTabView = require './ladder/ladder_tab'
-MyMatchesTabView = require './ladder/my_matches_tab'
-SimulateTabView = require './ladder/simulate_tab'
-LadderPlayModal = require './ladder/play_modal'
+LadderTabView = require './ladder_tab'
+MyMatchesTabView = require './my_matches_tab'
+SimulateTabView = require './simulate_tab'
+LadderPlayModal = require './play_modal'
 CocoClass = require 'lib/CocoClass'
 
 
@@ -25,7 +25,7 @@ class LevelSessionsCollection extends CocoCollection
 
 module.exports = class LadderView extends RootView
   id: 'ladder-view'
-  template: require 'templates/play/ladder'
+  template: require 'templates/play/ladder/ladder'
 
   subscriptions:
     'application:idle-changed': 'onIdleChanged'
@@ -53,6 +53,7 @@ module.exports = class LadderView extends RootView
     ctx.levelID = @levelID
     ctx.levelDescription = marked(@level.get('description')) if @level.get('description')
     ctx._ = _
+    ctx.tournamentTimeLeft = moment(new Date(1402444800000)).fromNow()
     ctx
 
   afterRender: ->
@@ -64,7 +65,7 @@ module.exports = class LadderView extends RootView
     @insertSubView(@simulateTab = new SimulateTabView())
     @refreshInterval = setInterval(@fetchSessionsAndRefreshViews.bind(@), 20 * 1000)
     hash = document.location.hash[1..] if document.location.hash
-    if hash and not (hash in ['my-matches', 'simulate', 'ladder'])
+    if hash and not (hash in ['my-matches', 'simulate', 'ladder', 'prizes', 'rules'])
       @showPlayModal(hash) if @sessions.loaded
 
   fetchSessionsAndRefreshViews: ->
@@ -100,6 +101,10 @@ module.exports = class LadderView extends RootView
       e.stopPropagation()
       e.preventDefault()
       @showApologeticSignupModal()
+    if link and /#rules$/.test link
+      @$el.find('a[href="#rules"]').tab('show')
+    if link and /#prizes/.test link
+      @$el.find('a[href="#prizes"]').tab('show')
 
   destroy: ->
     clearInterval @refreshInterval

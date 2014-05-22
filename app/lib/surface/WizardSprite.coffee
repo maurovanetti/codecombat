@@ -29,10 +29,9 @@ module.exports = class WizardSprite extends IndieSprite
     'right': 'onMoveKey'
 
   constructor: (thangType, options) ->
-    if options?.isSelf
+    if @isSelf = options.isSelf
       options.colorConfig = $.extend(true, {}, me.get('wizard')?.colorConfig) or {}
     super thangType, options
-    @isSelf = options.isSelf
     @targetPos = @thang.pos
     if @isSelf
       @setNameLabel me.displayName()
@@ -47,6 +46,13 @@ module.exports = class WizardSprite extends IndieSprite
     thang.bobTime = 2
     thang.pos.z += thang.bobHeight
     thang
+
+  finishSetup: ->
+    @updateBaseScale()
+    @scaleFactor = @thang.scaleFactor if @thang?.scaleFactor
+    @updateScale()
+    @updateRotation()
+    # Don't call general update() because Thang isn't built yet
 
   onPlayerStatesChanged: (e) ->
     for playerID, state of e.states

@@ -1,7 +1,11 @@
 ###
 This file will simulate games on node.js by emulating the browser environment.
 ###
-
+simulateOneGame = false
+if process.argv[2] is "one-game"
+  #calculate result of one game here
+  simulateOneGame = true
+  console.log "Simulating #{process.argv[3]} vs #{process.argv[4]}"
 bowerComponentsPath = "./bower_components/"
 headlessClientPath = "./headless_client/"
 
@@ -101,7 +105,11 @@ $.ajax
     unless jqXHR.status is 200
       console.log "User not authenticated. Status code: ", jqXHR.status
       return
+
     GLOBAL.window.userObject = response # JSON.parse response
     Simulator = require 'lib/simulator/Simulator'
     sim = new Simulator options
-    sim.fetchAndSimulateTask()
+    if simulateOneGame
+      sim.fetchAndSimulateOneGame(process.argv[3],process.argv[4])
+    else
+      sim.fetchAndSimulateTask()

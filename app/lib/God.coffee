@@ -47,14 +47,16 @@ module.exports = class God extends CocoClass
 
   setLevel: (@level) ->
   setLevelSessionIDs: (@levelSessionIDs) ->
-  setGoalManager: (goalManager) -> @angelsShare.goalManager = goalManager
+  setGoalManager: (goalManager) ->
+    @angelsShare.goalManager?.destroy() unless @angelsShare.goalManager is goalManager
+    @angelsShare.goalManager = goalManager
   setWorldClassMap: (worldClassMap) -> @angelsShare.worldClassMap = worldClassMap
 
   onTomeCast: (e) ->
     @createWorld e.spells, e.preload
 
   createWorld: (spells, preload=false) ->
-    console.log "#{@nick}: Let there be light upon #{@level.name}!"
+    console.log "#{@nick}: Let there be light upon #{@level.name}! (preload: #{preload})"
     userCodeMap = @getUserCodeMap spells
 
     # We only want one world being simulated, so we abort other angels, unless we had one preloading this very code.
@@ -66,6 +68,9 @@ module.exports = class God extends CocoClass
       if not hadPreloader and isPreloading
         angel.finalizePreload()
         hadPreloader = true
+      else if preload and angel.running and not angel.work.preload
+        # It's still running for real, so let's not preload.
+        return
       else
         angel.abort()
     return if hadPreloader
