@@ -39,11 +39,10 @@ module.exports = class ThangsTabView extends View
     'level-thang-edited': 'onLevelThangEdited'
     'level-thang-done-editing': 'onLevelThangDoneEditing'
     'level:view-switched': 'onViewSwitched'
-    'sprite:mouse-down': 'onSpriteMouseDown'
     'sprite:dragged': 'onSpriteDragged'
     'sprite:mouse-up': 'onSpriteMouseUp'
     'sprite:double-clicked': 'onSpriteDoubleClicked'
-    'surface:stage-mouse-down': 'onStageMouseDown'
+    'surface:stage-mouse-up': 'onStageMouseUp'
 
   events:
     'click #extant-thangs-filter button': 'onFilterExtantThangs'
@@ -70,7 +69,7 @@ module.exports = class ThangsTabView extends View
     @level = options.level
 
     $(document).bind 'contextmenu', @preventDefaultContextMenu
-    
+
   getRenderData: (context={}) ->
     context = super(context)
     return context unless @supermodel.finished()
@@ -103,12 +102,12 @@ module.exports = class ThangsTabView extends View
       $('#thangs-list').height(oldHeight - thangsHeaderHeight - 40)
     else
       $('#thangs-list').height(oldHeight - thangsHeaderHeight - 80)
-      
+
 
   afterRender: ->
     super()
     return unless @supermodel.finished()
-    $('.tab-content').click @selectAddThang
+    $('.tab-content').mousedown @selectAddThang
     $('#thangs-list').bind 'mousewheel', @preventBodyScrollingInThangList
     @$el.find('#extant-thangs-filter button:first').button('toggle')
     $(window).resize @onWindowResize
@@ -181,13 +180,13 @@ module.exports = class ThangsTabView extends View
 
   onSpriteMouseDown: (e) ->
     # Sprite clicks happen after stage clicks, but we need to know whether a sprite is being clicked.
-    clearTimeout @backgroundAddClickTimeout
-    if e.originalEvent.nativeEvent.button == 2
-      @onSpriteContextMenu e
+    # clearTimeout @backgroundAddClickTimeout
+    # if e.originalEvent.nativeEvent.button == 2
+    #   @onSpriteContextMenu e
 
-  onStageMouseDown: (e) ->
+  onStageMouseUp: (e) ->
     if @addThangSprite
-      # If we click on the background, we need to add @addThangSprite, but not if onSpriteMouseDown will fire.
+      # If we click on the background, we need to add @addThangSprite, but not if onSpriteMouseUp will fire.
       @backgroundAddClickTimeout = _.defer => @onExtantThangSelected {}
     $('#contextmenu').hide()
 
@@ -202,6 +201,9 @@ module.exports = class ThangsTabView extends View
     @calculateMovement(stageX / w, stageY / h, w / h)
 
   onSpriteMouseUp: (e) ->
+    clearTimeout @backgroundAddClickTimeout
+    if e.originalEvent.nativeEvent.button == 2
+      @onSpriteContextMenu e
     clearInterval(@movementInterval) if @movementInterval?
     @movementInterval = null
     @surface.camera.dragDisabled = false
@@ -248,7 +250,8 @@ module.exports = class ThangsTabView extends View
 #      @thangsTreema.deselectAll()
 
   selectAddThang: (e) =>
-    return unless e? and $(e.target).closest('#editor-level-thangs-tab-view').length
+    return if $(e.target).closest('#thang-search').length # Ignore if you're trying to search thangs
+    return unless e? and $(e.target).closest('#editor-level-thangs-tab-view').length or key.isPressed('esc')
     if e then target = $(e.target) else target = @$el.find('.add-thangs-palette')  # pretend to click on background if no event
     return true if target.attr('id') is 'surface'
     target = target.closest('.add-thang-palette-icon')
@@ -438,18 +441,15 @@ module.exports = class ThangsTabView extends View
 
   onDuplicateClicked: (e) ->
     $('#contextmenu').hide()
-    if !@addThangType
-      thang = @selectedExtantThang.spriteName
-      e.target = $(".add-thang-palette-icon[data-thang-type='" + thang + "']").get 0
-    @selectAddThang e
-    
+    @selectAddThangType @selectedExtantThang.spriteName, @selectedExtantThang
+
   toggleThangsContainer: (e) ->
     $('#all-thangs').toggle()
-    
+
   toggleThangsPalette: (e) ->
     $('#add-thangs-column').toggle()
     @onWindowResize e
-   
+
 
 class ThangsNode extends TreemaNode.nodeMap.array
   valueClass: 'treema-array-replacement'

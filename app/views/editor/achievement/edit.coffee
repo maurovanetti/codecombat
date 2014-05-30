@@ -9,13 +9,14 @@ module.exports = class AchievementEditView extends View
   startsLoading: true
 
   events:
-    'click #save-button': 'openSaveModal'
+    'click #save-button': 'saveAchievement'
 
   subscriptions:
-    'save-achievement': 'saveAchievement'
+    'save-new': 'saveAchievement'
 
   constructor: (options, @achievementID) ->
     super options
+    console.log @achievementID
     @achievement = new Achievement(_id: @achievementID)
     @achievement.saveBackups = true
 
@@ -39,7 +40,7 @@ module.exports = class AchievementEditView extends View
     data = $.extend(true, {}, @achievement.attributes)
     options =
       data: data
-      #filePath: "db/thang.type/#{@article.get('original')}"
+      filePath: "db/achievement/#{@achievement.get('_id')}"
       schema: Achievement.schema
       readOnly: me.get('anonymous')
       callbacks:
@@ -49,7 +50,7 @@ module.exports = class AchievementEditView extends View
     @treema.build()
 
   pushChangesToPreview: =>
-    'TODO'
+    'TODO' # TODO might want some intrinsic preview thing
 
   getRenderData: (context={}) ->
     context = super(context)
@@ -58,7 +59,18 @@ module.exports = class AchievementEditView extends View
     context
 
   openSaveModal: ->
-    'TODO'
+    'Maybe later' # TODO
 
   saveAchievement: (e) ->
-    'TODO'
+    @treema.endExistingEdits()
+    for key, value of @treema.data
+      @achievement.set(key, value)
+
+    res = @achievement.save()
+
+    res.error =>
+      console.log 'Failed to save achievement'
+
+    res.success =>
+      url = "/editor/achievement/#{@achievement.get('slug') or @achievement.id}"
+      document.location.href = url

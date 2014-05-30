@@ -63,12 +63,14 @@ module.exports = class LevelLoader extends CocoClass
       url += "?team=#{@team}" if @team
 
     session = new LevelSession().setURL url
-    @session = @supermodel.loadModel(session, 'level_session', {cache:false}).model
+    @sessionResource = @supermodel.loadModel(session, 'level_session', {cache:false})
+    @session = @sessionResource.model
     @session.once 'sync', -> @url = -> '/db/level.session/' + @id
 
     if @opponentSessionID
       opponentSession = new LevelSession().setURL "/db/level_session/#{@opponentSessionID}"
-      @opponentSession = @supermodel.loadModel(opponentSession, 'opponent_session').model
+      @opponentSessionResource = @supermodel.loadModel(opponentSession, 'opponent_session')
+      @opponentSession = @opponentSessionResource.model
 
   # Supermodel (Level) Loading
 
@@ -111,6 +113,8 @@ module.exports = class LevelLoader extends CocoClass
     @thangIDs = _.uniq thangIDs
     @thangNames = new ThangNamesCollection(@thangIDs)
     worldNecessities.push @supermodel.loadCollection(@thangNames, 'thang_names')
+    worldNecessities.push @sessionResource if @sessionResource?.isLoading
+    worldNecessities.push @opponentSessionResource if @opponentSessionResource?.isLoading
 
     for obj in objUniq componentVersions
       url = "/db/level.component/#{obj.original}/version/#{obj.majorVersion}"
@@ -144,6 +148,7 @@ module.exports = class LevelLoader extends CocoClass
 
     for thangTypeName in thangsToLoad
       thangType = nameModelMap[thangTypeName]
+      continue if thangType.isFullyLoaded()
       thangType.fetch()
       thangType = @supermodel.loadModel(thangType, 'thang').model
       res = @supermodel.addSomethingResource "sprite_sheet", 5
@@ -159,6 +164,7 @@ module.exports = class LevelLoader extends CocoClass
     @supermodel.loadModel(model, resourceName)
 
   onSupermodelLoaded: ->
+    return if @destroyed
     console.log 'SuperModel for Level loaded in', new Date().getTime() - @t0, 'ms'
     @loadLevelSounds()
     @denormalizeSession()
@@ -177,7 +183,7 @@ module.exports = class LevelLoader extends CocoClass
           spriteSheetResource.spriteSheetKeys = keys
         else
           spriteSheetResource.markLoaded()
-          
+
     clearInterval @buildLoopInterval unless someLeft
 
   onBuildComplete: (e) ->

@@ -111,9 +111,15 @@ module.exports = class CocoView extends Backbone.View
     context.isMobile = @isMobile()
     context.isIE = @isIE()
     context.moment = moment
+    context.translate = $.i18n.t
     context
 
   afterRender: ->
+    @renderScrollbar()
+
+  renderScrollbar: ->
+    #Defer the call till the content actually gets rendered, nanoscroller requires content to be visible
+    _.defer => @$el.find('.nano').nanoScroller() unless @destroyed
 
   updateProgress: (progress) ->
     @loadProgress.progress = progress if progress > @loadProgress.progress
