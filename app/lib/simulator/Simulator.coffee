@@ -34,7 +34,7 @@ module.exports = class Simulator extends CocoClass
         "humansGameID": humanGameID
         "ogresGameID": ogresGameID
       error: (errorData) ->
-        console.log "There was an error fetching two games! #{JSON.stringify errorData}"
+        console.warn "There was an error fetching two games! #{JSON.stringify errorData}"
       success: (taskData) =>
         return if @destroyed
         @trigger 'statusUpdate', 'Setting up simulation...'
@@ -43,6 +43,7 @@ module.exports = class Simulator extends CocoClass
 
         @supermodel ?= new SuperModel()
         @supermodel.resetProgress()
+        @stopListening @supermodel, 'loaded-all'
         @levelLoader = new LevelLoader supermodel: @supermodel, levelID: @task.getLevelName(), sessionID: @task.getFirstSessionID(), headless: true
 
         if @supermodel.finished()
@@ -57,17 +58,16 @@ module.exports = class Simulator extends CocoClass
     @setupGod()
     try
       @commenceSingleSimulation()
-    catch err
-      console.log err
-      @handleSingleSimulationError()
+    catch error
+      @handleSingleSimulationError error
 
   commenceSingleSimulation: ->
-    @god.createWorld @generateSpellsObject()
     Backbone.Mediator.subscribeOnce 'god:infinite-loop', @handleSingleSimulationInfiniteLoop, @
     Backbone.Mediator.subscribeOnce 'god:goals-calculated', @processSingleGameResults, @
+    @god.createWorld @generateSpellsObject()
 
-  handleSingleSimulationError: ->
-    console.log "There was an error simulating a single game!"
+  handleSingleSimulationError: (error) ->
+    console.error "There was an error simulating a single game!", error
     if @options.headlessClient
       console.log "GAMERESULT:tie"
       process.exit(0)
@@ -81,8 +81,8 @@ module.exports = class Simulator extends CocoClass
     @cleanupSimulation()
 
   processSingleGameResults: (simulationResults) ->
-    console.log "Processing results!"
     taskResults = @formTaskResultsObject simulationResults
+    console.log "Processing results:", taskResults
     humanSessionRank = taskResults.sessions[0].metrics.rank
     ogreSessionRank = taskResults.sessions[1].metrics.rank
     if @options.headlessClient
@@ -96,7 +96,7 @@ module.exports = class Simulator extends CocoClass
     else
       @sendSingleGameBackToServer(taskResults)
 
-    @cleanupSimulation()
+    @cleanupAndSimulateAnotherTask()
 
   sendSingleGameBackToServer: (results) ->
     @trigger 'statusUpdate', 'Simulation completed, sending results back to server!'
@@ -164,6 +164,7 @@ module.exports = class Simulator extends CocoClass
 
     @supermodel ?= new SuperModel()
     @supermodel.resetProgress()
+    @stopListening @supermodel, 'loaded-all'
     @levelLoader = new LevelLoader supermodel: @supermodel, levelID: levelID, sessionID: @task.getFirstSessionID(), headless: true
     if @supermodel.finished()
       @simulateGame()
@@ -198,9 +199,9 @@ module.exports = class Simulator extends CocoClass
     @god.setGoalManager new GoalManager(@world, @level.get 'goals')
 
   commenceSimulationAndSetupCallback: ->
-    @god.createWorld @generateSpellsObject()
     Backbone.Mediator.subscribeOnce 'god:infinite-loop', @onInfiniteLoop, @
     Backbone.Mediator.subscribeOnce 'god:goals-calculated', @processResults, @
+    @god.createWorld @generateSpellsObject()
 
     #Search for leaks, headless-client only.
     if @options.headlessClient and @options.leakTest and not @memwatch?
@@ -233,11 +234,12 @@ module.exports = class Simulator extends CocoClass
 
   processResults: (simulationResults) ->
     taskResults = @formTaskResultsObject simulationResults
+    console.error "*** Error: taskResults has no taskID ***\ntaskResults:", taskResults, "\ntask:", @task unless taskResults.taskID
     @sendResultsBackToServer taskResults
 
   sendResultsBackToServer: (results) ->
     @trigger 'statusUpdate', 'Simulation completed, sending results back to server!'
-    console.log "Sending result back to server!", results
+    console.log "Sending result back to server:", results
 
     if @options.headlessClient and @options.testing
       return @fetchAndSimulateTask()
@@ -255,7 +257,7 @@ module.exports = class Simulator extends CocoClass
     return if @destroyed
     console.log "Task registration result: #{JSON.stringify result}"
     @trigger 'statusUpdate', 'Results were successfully sent back to server!'
-    console.log "Simulated by you: " + @simulatedByYou
+    console.log "Simulated by you:", @simulatedByYou
     @simulatedByYou++
     unless @options.headlessClient
       simulatedBy = parseInt($('#simulated-by-you').text(), 10) + 1
@@ -393,6 +395,7 @@ module.exports = class Simulator extends CocoClass
         jshint_W030: {level: "ignore"}  # aether_NoEffect instead
         aether_MissingThis: {level: 'error'}
       #functionParameters: # TODOOOOO
+      executionLimit: 1 * 1000 * 1000
     if methodName is 'hear'
       aetherOptions.functionParameters = ['speaker', 'message', 'data']
     #console.log "creating aether with options", aetherOptions
@@ -477,6 +480,5 @@ class SimulationTask
         spellKey = pathComponents.join '/'
         @thangSpells[thang.id].push spellKey
         if not method.cloneOf and spellKey is desiredSpellKey
-          console.log "Setting #{desiredSpellKey} from world!"
-
+          #console.log "Setting #{desiredSpellKey} from world!"
           return method.source

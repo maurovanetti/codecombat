@@ -100,6 +100,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
         @actions = @thangType.getActions()
         @buildFromSpriteSheet result
         @createMarks()
+        @queueAction 'idle'
 
   finishSetup: ->
     @updateBaseScale()
@@ -260,7 +261,8 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
       @handledDisplayEvents[event] = true
       options = JSON.parse(event[5...])
       label = new createjs.Text options.text, "bold #{options.size or 16}px Arial", options.color or '#FFF'
-      label.shadow = new createjs.Shadow '#000', 0, 0, 2
+      shadowColor = {humans: '#F00', ogres: '#00F', neutral: '#0F0', common: '#0F0'}[@thang.team] ? '#000'
+      label.shadow = new createjs.Shadow shadowColor, 1, 1, 3
       offset = @getOffset 'aboveHead'
       [label.x, label.y] = [@imageObject.x + offset.x - label.getMeasuredWidth() / 2, @imageObject.y + offset.y]
       @options.floatingLayer.addChild label
@@ -293,7 +295,8 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
       p1.z += bobOffset
     x: p1.x, y: p1.y, z: if @thang.isLand then 0 else p1.z - @thang.depth / 2
 
-  updatePosition: ->
+  updatePosition: (log) ->
+    return if @stillLoading
     return unless @thang?.pos and @options.camera?
     wop = @getWorldPosition()
     [p0, p1] = [@lastPos, @thang.pos]
@@ -302,7 +305,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     [@imageObject.x, @imageObject.y] = [sup.x, sup.y]
     @lastPos = p1.copy?() or _.clone(p1)
     @hasMoved = true
-    
+
   updateBaseScale: ->
     scale = 1
     scale = @thangType.get('scale') or 1 if @isRaster
@@ -331,9 +334,9 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
           @imageObject.scaleY *= @thangType.get('scale') ? 1
         [@lastThangWidth, @lastThangHeight] = [@thang.width, @thang.height]
       return
-    
+
     scaleX = scaleY = 1
-      
+
     if @thangType.get('name') in ['Arrow', 'Spear']
       # Scales the arrow so it appears longer when flying parallel to horizon.
       # To do that, we convert angle to [0, 90] (mirroring half-planes twice), then make linear function out of it:
@@ -499,7 +502,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     return if @letterboxOn
     p = @imageObject
     p = p.parent while p.parent
-    newEvent = sprite: @, thang: @thang, originalEvent: e, canvas:p
+    newEvent = sprite: @, thang: @thang, originalEvent: e, canvas:p.canvas
     @trigger ourEventName, newEvent
     Backbone.Mediator.publish ourEventName, newEvent
 
@@ -574,7 +577,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
       @marks[range['name']].toggle false for range in @ranges
 
     if @thangType.get('name') in ['Arrow', 'Spear'] and @thang.action is 'die'
-      @marks.shadow.hide()
+      @marks.shadow?.hide()
     mark.update() for name, mark of @marks
     #@thang.effectNames = ['berserk', 'confuse', 'control', 'curse', 'fear', 'poison', 'paralyze', 'regen', 'sleep', 'slow', 'haste']
     @updateEffectMarks() if @thang?.effectNames?.length or @previousEffectNames?.length
@@ -628,11 +631,6 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     return unless @thang?.collides and @options.camera?
     @addMark 'debug', @options.floatingLayer if debug
     @marks.debug?.toggle debug
-
-  getAverageDimension: ->
-    bounds = @imageObject.getBounds()
-    averageDimension = (bounds.height + bounds.width) / 2
-    Math.min(80, averageDimension)
 
   addLabel: (name, style) ->
     @labels[name] ?= new Label sprite: @, camera: @options.camera, layer: @options.textLayer, style: style

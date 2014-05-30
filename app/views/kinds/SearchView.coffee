@@ -31,31 +31,6 @@ module.exports = class SearchView extends View
     'shown.bs.modal #new-model-modal': 'focusOnName'
     'hidden.bs.modal #new-model-modal': 'onModalHidden'
 
-  getRenderData: ->
-    context = super()
-    switch @modelLabel
-      when 'Level'
-        context.currentEditor = 'editor.level_title'
-        context.currentNew = 'editor.new_level_title'
-        context.currentNewSignup = 'editor.new_level_title_signup'
-        context.currentSearch = 'editor.level_search_title'
-      when 'Thang Type'
-        context.currentEditor = 'editor.thang_title'
-        context.currentNew = 'editor.new_thang_title'
-        context.currentNewSignup = 'editor.new_thang_title_signup'
-        context.currentSearch = 'editor.thang_search_title'
-      when 'Article'
-        context.currentEditor = 'editor.article_title'
-        context.currentNew = 'editor.new_article_title'
-        context.currentNewSignup = 'editor.new_article_title_signup'
-        context.currentSearch = 'editor.article_search_title'
-      when 'Achievement'
-        context.currentEditor = 'Achievement'
-        context.currentNew = 'Achievement'
-        context.currentNewSignup = 'Dont care'
-        context.currentSearch = 'Search for thingsies'
-    @$el.i18n()
-    context
 
   constructor: (options) ->
     @runSearch = _.debounce(@runSearch, 500)

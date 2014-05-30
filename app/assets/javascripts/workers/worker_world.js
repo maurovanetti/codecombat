@@ -266,7 +266,6 @@ self.enableFlowOnThangSpell = function (thangID, spellID, userCodeMap) {
 self.setupDebugWorldToRunUntilFrame = function (args) {
     self.debugPostedErrors = {};
     self.debugt0 = new Date();
-    self.debugPostedErrors = false;
     self.logsLogged = 0;
 
     var stringifiedUserCodeMap = JSON.stringify(args.userCodeMap);
@@ -290,6 +289,7 @@ self.setupDebugWorldToRunUntilFrame = function (args) {
             return;
         }
         Math.random = self.debugWorld.rand.randf;  // so user code is predictable
+        Aether.replaceBuiltin("Math", Math);
     }
     self.debugWorld.totalFrames = args.frame; //hack to work around error checking
     self.currentDebugWorldFrame = args.frame;
@@ -315,6 +315,7 @@ self.onDebugWorldProgress = function onDebugWorldProgress(progress) {
 self.debugAbort = function () {
     if(self.debugWorld) {
         self.debugWorld.abort();
+        self.debugWorld.destroy();
         self.debugWorld = null;
     }
     self.postMessage({type: 'debug-abort'});
@@ -323,7 +324,6 @@ self.debugAbort = function () {
 self.runWorld = function runWorld(args) {
   self.postedErrors = {};
   self.t0 = new Date();
-  self.postedErrors = false;
   self.logsLogged = 0;
 
   try {
@@ -344,6 +344,7 @@ self.runWorld = function runWorld(args) {
     return;
   }
   Math.random = self.world.rand.randf;  // so user code is predictable
+  Aether.replaceBuiltin("Math", Math);
   self.postMessage({type: 'start-load-frames'});
   self.world.loadFrames(self.onWorldLoaded, self.onWorldError, self.onWorldLoadProgress);
 };
@@ -379,6 +380,7 @@ self.onWorldLoaded = function onWorldLoaded() {
   var t3 = new Date();
   console.log("And it was so: (" + (diff / self.world.totalFrames).toFixed(3) + "ms per frame,", self.world.totalFrames, "frames)\nSimulation   :", diff + "ms \nSerialization:", (t2 - t1) + "ms\nDelivery     :", (t3 - t2) + "ms");
   self.world.goalManager.destroy();
+  self.world.destroy();
   self.world = null;
 };
 
@@ -392,6 +394,7 @@ self.onWorldError = function onWorldError(error) {
   }
   else {
     console.log("Non-UserCodeError:", error.toString() + "\n" + error.stack || error.stackTrace);
+    self.postMessage({type: 'non-user-code-problem', problem: {message: error.toString()}});
   }
   /*  We don't actually have the recoverable property any more; hmm
   if(!error.recoverable) {
@@ -410,6 +413,7 @@ self.abort = function abort() {
   if(self.world) {
     self.world.abort();
     self.world.goalManager.destroy();
+    self.world.destroy();
     self.world = null;
   }
   self.postMessage({type: 'abort'});

@@ -1,6 +1,7 @@
 mongoose = require('mongoose')
 Achievement = require('../achievements/Achievement')
 EarnedAchievement = require '../achievements/EarnedAchievement'
+User = require '../users/User'
 LocalMongo = require '../../app/lib/LocalMongo'
 util = require '../../app/lib/utils'
 
@@ -17,12 +18,9 @@ loadAchievements = ->
 
 loadAchievements()
 
-
-# TODO make a difference between '$userID' and '$userObjectID' ?
 module.exports = AchievablePlugin = (schema, options) ->
   checkForAchievement = (doc) ->
     collectionName = doc.constructor.modelName
-    console.log achievements
     for achievement in achievements[collectionName]
       console.log achievement.get 'name'
 
@@ -42,9 +40,11 @@ module.exports = AchievablePlugin = (schema, options) ->
       for achievement in achievements[category]
         query = achievement.get('query')
         isRepeatable = achievement.get('proportionalTo')?
-        console.log 'isRepeatable: ' + isRepeatable
         alreadyAchieved = if isNew then false else LocalMongo.matchesQuery originalDocObj, query
         newlyAchieved = LocalMongo.matchesQuery(docObj, query)
+        console.log 'isRepeatable: ' + isRepeatable
+        console.log 'alreadyAchieved: ' +  alreadyAchieved
+        console.log 'newlyAchieved: ' + newlyAchieved
 
         userObjectID = doc.get(achievement.get('userField'))
         userID = if _.isObject userObjectID then userObjectID.toHexString() else userObjectID # Standardize! Use strings, not ObjectId's
@@ -55,23 +55,39 @@ module.exports = AchievablePlugin = (schema, options) ->
             achievement: achievement._id.toHexString()
             achievementName: achievement.get 'name'
           }
-          if isRepeatable
+          earnedPoints = 0
+          wrapUp = ->
+            # Update user's experience points
+            User.update({_id: userID}, {$inc: {points: earnedPoints}}, {}, (err, count) ->
+              console.error err if err?
+            )
+
+          if isRepeatable # TODO test more thoroughly
             console.log 'Upserting repeatable achievement called \'' + (achievement.get 'name') + '\' for ' + userID
             proportionalTo = achievement.get 'proportionalTo'
-            originalValue = util.getByPath(originalDocObj, proportionalTo)
-            newValue = docObj.get proportionalTo
+            originalAmount = util.getByPath(originalDocObj, proportionalTo) or 0
+            newAmount = docObj.get proportionalTo
 
-            if originalValue != newValue
+            if originalAmount isnt newAmount
               earned.notified = false
-              earned.achievedAmount = newValue
+              earned.achievedAmount = newAmount
               earned.changed = Date.now()
-              upsertQuery = EarnedAchievement.findOneAndUpdate earned, upsert:true
-              upsertQuery.exec (err, docs) ->
-                console.log err if err?
-          else # alreadyAchieved
+              EarnedAchievement.findOneAndUpdate({achievement:earned.achievement, user:earned.user}, earned, upsert:true, (err, docs) ->
+                  return console.log err if err?
+              )
+
+              earnedPoints = achievement.get('worth') * (newAmount - originalAmount)
+              wrapUp()
+
+          else # not alreadyAchieved
             console.log 'Creating a new earned achievement called \'' + (achievement.get 'name') + '\' for ' + userID
             (new EarnedAchievement(earned)).save (err, doc) ->
-              console.log err if err?
+              return console.log err if err?
+
+              earnedPoints = achievement.get('worth')
+              wrapUp()
+
+
 
 
 

@@ -60,7 +60,7 @@ UserSchema = c.object {},
     colorConfig: c.object {additionalProperties: c.colorConfig()}
 
   aceConfig: c.object {},
-    language: {type: 'string', 'default': 'javascript', 'enum': ['javascript', 'coffeescript', 'clojure', 'lua', 'python']}
+    language: {type: 'string', 'default': 'javascript', 'enum': ['javascript', 'coffeescript', 'python', 'clojure', 'lua', 'io']}
     keyBindings: {type: 'string', 'default': 'default', 'enum': ['default', 'vim', 'emacs']}
     invisibles: {type: 'boolean', 'default': false}
     indentGuides: {type: 'boolean', 'default': false}
@@ -114,6 +114,7 @@ UserSchema = c.object {},
     linkedinID: c.shortString {title:"LinkedInID", description: "The user's LinkedIn ID when they signed the contract."}
     date: c.date {title: "Date signed employer agreement"}
     data: c.object {description: "Cached LinkedIn data slurped from profile."}
+  points: {type:'number'}
 
 
 c.extendBasicProperties UserSchema, 'user'

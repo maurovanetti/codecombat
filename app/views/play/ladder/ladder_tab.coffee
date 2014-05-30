@@ -52,6 +52,7 @@ module.exports = class LadderTabView extends CocoView
     @fbStatusRes.load()
 
     FB.getLoginStatus (response) =>
+      return if @destroyed
       @facebookStatus = response.status
       @loadFacebookFriends() if @facebookStatus is 'connected'
       @fbStatusRes.markLoaded()
@@ -153,7 +154,9 @@ module.exports = class LadderTabView extends CocoView
     @supermodel.resetProgress()
     @ladderLimit ?= parseInt @getQueryVariable('top_players', 20)
     for team in @teams
-      @leaderboards[team.id]?.destroy()
+      if oldLeaderboard = @leaderboards[team.id]
+        @supermodel.removeModelResource oldLeaderboard
+        oldLeaderboard.destroy()
       teamSession = _.find @sessions.models, (session) -> session.get('team') is team.id
       @leaderboards[team.id] = new LeaderboardData(@level, team.id, teamSession, @ladderLimit)
       @leaderboardRes = @supermodel.addModelResource(@leaderboards[team.id], 'leaderboard', 3)

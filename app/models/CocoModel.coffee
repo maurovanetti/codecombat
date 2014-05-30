@@ -1,11 +1,14 @@
 storage = require 'lib/storage'
 deltasLib = require 'lib/deltas'
 
+NewAchievementCollection = require '../collections/NewAchievementCollection'
+
 class CocoModel extends Backbone.Model
   idAttribute: "_id"
   loaded: false
   loading: false
   saveBackups: false
+  notyErrors: true
   @schema: null
 
   getMe: -> @me or @me = require('lib/auth').me
@@ -31,13 +34,15 @@ class CocoModel extends Backbone.Model
 
   onError: ->
     @loading = false
+    @jqxhr = null
 
   onLoaded: ->
     @loaded = true
     @loading = false
+    @jqxhr = null
     @markToRevert()
     @loadFromBackup()
-    
+
   getNormalizedURL: -> "#{@urlRoot}/#{@id}"
 
   set: ->
@@ -69,11 +74,19 @@ class CocoModel extends Backbone.Model
     @set 'editPath', document.location.pathname
     options ?= {}
     success = options.success
-    options.success = (resp) =>
+    error = options.error
+    options.success = (model, res) =>
       @trigger "save:success", @
-      success(@, resp) if success
+      success(@, res) if success
       @markToRevert()
       @clearBackup()
+      CocoModel.pollAchievements()
+    options.error = (model, res) =>
+      error(@, res) if error
+      return unless @notyErrors
+      errorMessage = "Error saving #{@get('name') ? @type()}"
+      console.error errorMessage, res.responseJSON
+      noty text: "#{errorMessage}: #{res.status} #{res.statusText}", layout: 'topCenter', type: 'error', killer: false, timeout: 10000
     @trigger "save", @
     return super attrs, options
 
@@ -83,6 +96,7 @@ class CocoModel extends Backbone.Model
     @jqxhr
 
   markToRevert: ->
+    return unless @saveBackups
     if @type() is 'ThangType'
       @_revertAttributes = _.clone @attributes  # No deep clones for these!
     else
@@ -96,7 +110,7 @@ class CocoModel extends Backbone.Model
     storage.remove @id
 
   hasLocalChanges: ->
-    not _.isEqual @attributes, @_revertAttributes
+    @_revertAttributes and not _.isEqual @attributes, @_revertAttributes
 
   cloneNewMinorVersion: ->
     newData = _.clone @attributes
@@ -164,7 +178,7 @@ class CocoModel extends Backbone.Model
   getDelta: ->
     differ = deltasLib.makeJSONDiffer()
     differ.diff @_revertAttributes, @attributes
-    
+
   getDeltaWith: (otherModel) ->
     differ = deltasLib.makeJSONDiffer()
     differ.diff @attributes, otherModel.attributes
@@ -247,5 +261,15 @@ class CocoModel extends Backbone.Model
 
   getURL: ->
     return if _.isString @url then @url else @url()
+
+  @pollAchievements: ->
+    achievements = new NewAchievementCollection
+    achievements.fetch(
+      success: (collection) ->
+        Backbone.Mediator.publish('achievements:new', collection) unless _.isEmpty(collection.models)
+    )
+
+
+CocoModel.pollAchievements = _.debounce CocoModel.pollAchievements, 500
 
 module.exports = CocoModel
