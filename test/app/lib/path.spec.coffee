@@ -1,6 +1,6 @@
 describe('Path.createPath', ->
   path = require 'lib/surface/path'
-  it('ignores the first point', ->
+  xit('ignores the first point', ->
     points = [[0,0], [1,1], [2,2]]
     g = new createjs.Graphics()
     g.lineTo = jasmine.createSpy('graphicz')
