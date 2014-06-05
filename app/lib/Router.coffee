@@ -95,6 +95,8 @@ module.exports = class CocoRouter extends Backbone.Router
     return view
 
   routeDirectly: (path, args) ->
+    if window.currentView?.reloadOnClose
+      return document.location.reload()
     path = "views/#{path}"
     ViewClass = @tryToLoadModule path
     return @showNotFound() if not ViewClass

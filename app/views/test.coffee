@@ -6,6 +6,7 @@ TEST_BASE_PATH = 'test/app/'
 module.exports = class TestView extends CocoView
   id: "test-view"
   template: template
+  reloadOnClose: true
   
   # INITIALIZE
 
@@ -99,6 +100,7 @@ module.exports = class TestView extends CocoView
   runTests: ->
     describe 'CodeCombat Client', =>
       beforeEach ->
+        jasmine.Ajax.install()
         # TODO get some setup and teardown prepped
       require f for f in @specFiles # runs the tests
 
