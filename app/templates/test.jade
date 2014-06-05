@@ -12,9 +12,11 @@ ol.breadcrumb
 .nav.nav-pills.nav-stacked.pull-right.well#test-nav
   for child in children
     li(class=child.type)
-      a(href=child.url)
+      a(href=child.url).small
         if child.type == 'folder'
           span.glyphicon.glyphicon-folder-close
         else
           span.glyphicon.glyphicon-file
         span.spl= child.name
+        if child.type == 'folder'
+          strong (#{child.size})

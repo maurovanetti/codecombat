@@ -61,14 +61,17 @@ module.exports = class TestView extends CocoView
       continue unless f
       parts = f.split('/')
       name = parts[0]
-      (if parts.length is 1 then files else folders)[name] = true
+      group = if parts.length is 1 then files else folders
+      group[name] ?= 0
+      group[name] += 1
 
     children = []
     for name in _.keys(folders)
       children.push { 
         type:'folder',
         url:"/test#{@subPath}/#{name}"
-        name: name
+        name: name+'/'
+        size: folders[name]
       }
     for name in _.keys(files)
       children.push {
