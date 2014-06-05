@@ -11,7 +11,8 @@ module.exports = class TestView extends CocoView
 
   constructor: (options, @subPath='') ->
     super(options)
-    @loadJasmine()
+    @subPath = @subPath[1..] if @subPath[0] is '/'
+    @loadJasmine() unless TestView.loaded
 
   loadJasmine: ->
     @queue = new createjs.LoadQueue()
@@ -53,11 +54,13 @@ module.exports = class TestView extends CocoView
     return [] unless @specFiles
     folders = {}
     files = {}
-    prefix = TEST_BASE_PATH + @subPath
-    if prefix[prefix.length-1] isnt '/'
-      prefix += '/'
+    
+    requirePrefix = TEST_BASE_PATH + @subPath
+    if requirePrefix[requirePrefix.length-1] isnt '/'
+      requirePrefix += '/'
+      
     for f in @specFiles
-      f = f[prefix.length..]
+      f = f[requirePrefix.length..]
       continue unless f
       parts = f.split('/')
       name = parts[0]
@@ -66,17 +69,20 @@ module.exports = class TestView extends CocoView
       group[name] += 1
 
     children = []
+    urlPrefix = '/test/'+@subPath
+    urlPrefix += '/' if urlPrefix[urlPrefix.length-1] isnt '/'
+    
     for name in _.keys(folders)
       children.push { 
         type:'folder',
-        url:"/test#{@subPath}/#{name}"
+        url: urlPrefix+name
         name: name+'/'
         size: folders[name]
       }
     for name in _.keys(files)
       children.push {
         type:'file',
-        url:"/test/#{@subPath}/#{name}"
+        url: urlPrefix+name
         name: name
       }
     children
@@ -95,3 +101,8 @@ module.exports = class TestView extends CocoView
       beforeEach ->
         # TODO get some setup and teardown prepped
       require f for f in @specFiles # runs the tests
+
+  destroy: ->
+    # hack to get jasmine tests to properly run again on clicking links, and make sure if you
+    # leave this page (say, back to the main site) that test stuff doesn't follow you.
+    document.location.reload()
