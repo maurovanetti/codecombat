@@ -1,11 +1,14 @@
 storage = require 'lib/storage'
 deltasLib = require 'lib/deltas'
 
+NewAchievementCollection = require '../collections/NewAchievementCollection'
+
 class CocoModel extends Backbone.Model
   idAttribute: "_id"
   loaded: false
   loading: false
   saveBackups: false
+  notyErrors: true
   @schema: null
 
   getMe: -> @me or @me = require('lib/auth').me
@@ -14,10 +17,10 @@ class CocoModel extends Backbone.Model
     super()
     if not @constructor.className
       console.error("#{@} needs a className set.")
-    @markToRevert()
     @addSchemaDefaults()
-    @once 'sync', @onLoaded, @
+    @on 'sync', @onLoaded, @
     @on 'error', @onError, @
+    @on 'add', @onLoaded, @
     @saveBackup = _.debounce(@saveBackup, 500)
 
   type: ->
@@ -31,18 +34,21 @@ class CocoModel extends Backbone.Model
 
   onError: ->
     @loading = false
+    @jqxhr = null
 
   onLoaded: ->
     @loaded = true
     @loading = false
-    @markToRevert()
+    @jqxhr = null
     @loadFromBackup()
-    
+
   getNormalizedURL: -> "#{@urlRoot}/#{@id}"
 
   set: ->
+    inFlux = @loading or not @loaded
+    @markToRevert() unless inFlux or @_revertAttributes
     res = super(arguments...)
-    @saveBackup() if @saveBackups and @loaded and @hasLocalChanges()
+    @saveBackup() if @saveBackups and (not inFlux) and @hasLocalChanges()
     res
 
   loadFromBackup: ->
@@ -58,22 +64,37 @@ class CocoModel extends Backbone.Model
 
   @backedUp = {}
   schema: -> return @constructor.schema
+    
+  getValidationErrors: ->
+    errors = tv4.validateMultiple(@attributes, @constructor.schema or {}).errors
+    return errors if errors?.length
 
   validate: ->
-    result = tv4.validateMultiple(@attributes, @constructor.schema? or {})
-    if result.errors?.length
-      console.log @, "got validate result with errors:", result
-    return result.errors unless result.valid
-
+    errors = @getValidationErrors()
+    if errors?.length
+      console.debug "Validation failed for #{@constructor.className}: '#{@get('name') or @}'."
+      for error in errors
+        console.debug "\t", error.dataPath, ":", error.message
+      return errors
+  
   save: (attrs, options) ->
-    @set 'editPath', document.location.pathname
     options ?= {}
+    options.headers ?= {}
+    options.headers['X-Current-Path'] = document.location.pathname
     success = options.success
-    options.success = (resp) =>
+    error = options.error
+    options.success = (model, res) =>
       @trigger "save:success", @
-      success(@, resp) if success
-      @markToRevert()
+      success(@, res) if success
+      @markToRevert() if @_revertAttributes
       @clearBackup()
+      CocoModel.pollAchievements()
+    options.error = (model, res) =>
+      error(@, res) if error
+      return unless @notyErrors
+      errorMessage = "Error saving #{@get('name') ? @type()}"
+      console.error errorMessage, res.responseJSON
+      noty text: "#{errorMessage}: #{res.status} #{res.statusText}", layout: 'topCenter', type: 'error', killer: false, timeout: 10000
     @trigger "save", @
     return super attrs, options
 
@@ -83,6 +104,7 @@ class CocoModel extends Backbone.Model
     @jqxhr
 
   markToRevert: ->
+    console.debug "Saving _revertAttributes for #{@constructor.className}: '#{@get('name')}'"
     if @type() is 'ThangType'
       @_revertAttributes = _.clone @attributes  # No deep clones for these!
     else
@@ -96,7 +118,7 @@ class CocoModel extends Backbone.Model
     storage.remove @id
 
   hasLocalChanges: ->
-    not _.isEqual @attributes, @_revertAttributes
+    @_revertAttributes and not _.isEqual @attributes, @_revertAttributes
 
   cloneNewMinorVersion: ->
     newData = _.clone @attributes
@@ -131,7 +153,6 @@ class CocoModel extends Backbone.Model
       #console.log "setting", prop, "to", sch.default, "from sch.default" if sch.default?
       @set prop, sch.default if sch.default?
     if @loaded
-      @markToRevert()
       @loadFromBackup()
 
   @isObjectID: (s) ->
@@ -164,7 +185,7 @@ class CocoModel extends Backbone.Model
   getDelta: ->
     differ = deltasLib.makeJSONDiffer()
     differ.diff @_revertAttributes, @attributes
-    
+
   getDeltaWith: (otherModel) ->
     differ = deltasLib.makeJSONDiffer()
     differ.diff @attributes, otherModel.attributes
@@ -247,5 +268,15 @@ class CocoModel extends Backbone.Model
 
   getURL: ->
     return if _.isString @url then @url else @url()
+
+  @pollAchievements: ->
+    achievements = new NewAchievementCollection
+    achievements.fetch(
+      success: (collection) ->
+        me.fetch (success: -> Backbone.Mediator.publish('achievements:new', collection)) unless _.isEmpty(collection.models)
+    )
+
+
+CocoModel.pollAchievements = _.debounce CocoModel.pollAchievements, 500
 
 module.exports = CocoModel

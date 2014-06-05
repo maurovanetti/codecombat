@@ -17,6 +17,7 @@ module.exports = class DebugView extends View
     'tome:spell-shown': 'changeCurrentThangAndSpell'
     'tome:cast-spells': 'onTomeCast'
     'surface:frame-changed': 'onFrameChanged'
+    'tome:spell-has-changed-significantly-calculation': 'onSpellChangedCalculation'
 
   events: {}
 
@@ -34,26 +35,40 @@ module.exports = class DebugView extends View
     @cache = {}
     @lastFrameRequested = -1
     @workerIsSimulating = false
+    @spellHasChanged = false
     
+
+
+  pad2: (num) ->
+    if not num? or num is 0 then "00" else ((if num < 10 then "0" else "") + num)
+
+  calculateCurrentTimeString: =>
+    time = @currentFrame / @frameRate
+    mins = Math.floor(time / 60)
+    secs = (time - mins * 60).toFixed(1)
+    "#{mins}:#{@pad2 secs}"
+
+
   setTooltipKeyAndValue: (key, value) =>
-    @$el.find("code").text "#{key}: #{value}"
+    message = "Time: #{@calculateCurrentTimeString()}\n#{key}: #{value}"
+    @$el.find("code").text message
     @$el.show().css(@pos)
-    
+
   setTooltipText: (text) =>
     #perhaps changing styling here in the future
     @$el.find("code").text text
     @$el.show().css(@pos)
-    
+
   onTomeCast: ->
     @invalidateCache()
-    
+
   invalidateCache: -> @cache = {}
-  
+
   retrieveValueFromCache: (thangID,spellID,variableChain,frame) ->
     joinedVariableChain = variableChain.join()
     value = @cache[frame]?[thangID]?[spellID]?[joinedVariableChain]
     return value ? undefined
-  
+
   updateCache: (thangID, spellID, variableChain, frame, value) ->
     currentObject = @cache
     keys = [frame,thangID,spellID,variableChain.join()]
@@ -63,8 +78,8 @@ module.exports = class DebugView extends View
         currentObject[key] = {}
       currentObject = currentObject[key]
     currentObject[keys[keys.length - 1]] = value
-  
-      
+
+
   changeCurrentThangAndSpell: (thangAndSpellObject) ->
     @thang = thangAndSpellObject.thang
     @spell = thangAndSpellObject.spell
@@ -128,13 +143,23 @@ module.exports = class DebugView extends View
 
   onNewWorld: (e) ->
     @thang = @options.thang = e.world.thangMap[@thang.id] if @thang
-    
+    @frameRate = e.world.frameRate
+
   onFrameChanged: (data) ->
     @currentFrame = data.frame
+    @frameRate = data.world.frameRate
+  onSpellChangedCalculation: (data) ->
+    @spellHasChanged = data.hasChangedSignificantly
     
   update: ->
     if @variableChain
-      if @workerIsSimulating
+      if @spellHasChanged
+        @setTooltipText("You've changed this spell! \nPlease recast to use the hover debugger.")
+      else if @variableChain.length is 2 and @variableChain[0] is "this"
+        @setTooltipKeyAndValue(@variableChain.join("."),@stringifyValue(@thang[@variableChain[1]],0))
+      else if @variableChain.length is 1 and Aether.globals[@variableChain[0]]
+        @setTooltipKeyAndValue(@variableChain.join("."),@stringifyValue(Aether.globals[@variableChain[0]],0))
+      else if @workerIsSimulating
         @setTooltipText("World is simulating, please wait...")
       else if @currentFrame is @lastFrameRequested and (cacheValue = @retrieveValueFromCache(@thang.id, @spell.name, @variableChain, @currentFrame))
         @setTooltipKeyAndValue(@variableChain.join("."),cacheValue)
@@ -156,6 +181,39 @@ module.exports = class DebugView extends View
       @notifyPropertyHovered()
     @updateMarker()
 
+  stringifyValue: (value, depth) ->
+    return value if not value or _.isString value
+    if _.isFunction value
+      return if depth is 2 then undefined else "<Function>"
+    return "<this #{value.id}>" if value is @thang and depth
+    if depth is 2
+      if value.constructor?.className is "Thang"
+        value = "<#{value.type or value.spriteName} - #{value.id}, #{if value.pos then value.pos.toString() else 'non-physical'}>"
+      else
+        value = value.toString()
+      return value
+
+    isArray = _.isArray value
+    isObject = _.isObject value
+    return value.toString() unless isArray or isObject
+    brackets = if isArray then ["[", "]"] else ["{", "}"]
+    size = _.size value
+    return brackets.join "" unless size
+    values = []
+    if isArray
+      for v in value
+        s = @stringifyValue(v, depth + 1)
+        values.push "" + s unless s is undefined
+    else
+      for key in value.apiProperties ? _.keys value
+        s = @stringifyValue(value[key], depth + 1)
+        values.push key + ": " + s unless s is undefined
+    sep = '\n' + ("  " for i in [0 ... depth]).join('')
+    prefix = value.constructor?.className
+    prefix ?= "Array" if isArray
+    prefix ?= "Object" if isObject
+    prefix = if prefix then prefix + " " else ""
+    return "#{prefix}#{brackets[0]}#{sep}  #{values.join(sep + '  ')}#{sep}#{brackets[1]}"
   notifyPropertyHovered: =>
     clearTimeout @hoveredPropertyTimeout if @hoveredPropertyTimeout
     @hoveredPropertyTimeout = null
@@ -163,6 +221,7 @@ module.exports = class DebugView extends View
     @hoveredProperty = if @variableChain?.length is 2 then owner: @variableChain[0], property: @variableChain[1] else {}
     unless _.isEqual oldHoveredProperty, @hoveredProperty
       Backbone.Mediator.publish 'tome:spell-debug-property-hovered', @hoveredProperty
+
   updateMarker: ->
     if @marker
       @ace.getSession().removeMarker @marker

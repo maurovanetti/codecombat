@@ -3,7 +3,7 @@ template = require 'templates/account/settings'
 {me} = require('lib/auth')
 forms = require('lib/forms')
 User = require('models/User')
-LoginModalView = require 'views/modal/login_modal'
+AuthModalView = require 'views/modal/auth_modal'
 
 WizardSettingsView = require './wizard_settings_view'
 JobProfileView = require './job_profile_view'
@@ -49,7 +49,7 @@ module.exports = class SettingsView extends View
   afterInsert: ->
     super()
     if me.get('anonymous')
-      @openModalView new LoginModalView()
+      @openModalView new AuthModalView()
 
   chooseTab: (category) ->
     id = "##{category}-pane"
@@ -107,6 +107,7 @@ module.exports = class SettingsView extends View
     @grabData()
     res = me.validate()
     if res?
+      console.error "Couldn't save because of validation errors:", res
       forms.applyErrorsToForm(@$el, res)
       return
 
@@ -144,7 +145,7 @@ module.exports = class SettingsView extends View
     me.set 'name', $('#name', @$el).val()
     me.set 'email', $('#email', @$el).val()
     for emailName, enabled of @getSubscriptions()
-      me.setEmailSubscription emailName, enabled 
+      me.setEmailSubscription emailName, enabled
     me.set 'photoURL', @pictureTreema.get('/photoURL')
 
     adminCheckbox = @$el.find('#admin')

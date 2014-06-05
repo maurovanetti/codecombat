@@ -14,8 +14,9 @@ module.exports = class GoalManager extends CocoClass
   # If you want weird goals or hybrid goals, make a custom goal.
 
   nextGoalID: 0
+  nicks: ["GoalManager"]
 
-  constructor: (@world, @initialGoals) ->
+  constructor: (@world, @initialGoals, @team) ->
     super()
     @init()
 
@@ -78,8 +79,8 @@ module.exports = class GoalManager extends CocoClass
   # main instance gets them and updates their existing goal states,
   # passes the word along
   onNewWorldCreated: (e) ->
-    @updateGoalStates(e.goalStates) if e.goalStates?
     @world = e.world
+    @updateGoalStates(e.goalStates) if e.goalStates?
 
   updateGoalStates: (newGoalStates) ->
     for goalID, goalState of newGoalStates
@@ -104,12 +105,18 @@ module.exports = class GoalManager extends CocoClass
 
   notifyGoalChanges: ->
     overallStatus = @checkOverallStatus()
-    event = {goalStates: @goalStates, goals: @goals, overallStatus: overallStatus}
+    event =
+      goalStates: @goalStates
+      goals: @goals
+      overallStatus: overallStatus
+      timedOut: @world.totalFrames is @world.maxTotalFrames
     Backbone.Mediator.publish('goal-manager:new-goal-states', event)
 
   checkOverallStatus: (ignoreIncomplete=false) ->
     overallStatus = null
-    statuses = if @goalStates then (val.status for key, val of @goalStates) else []
+    goals = if @goalStates then _.values @goalStates else []
+    goals = (g for g in goals when g.team in [undefined, @team]) if @team
+    statuses = if @goalStates then (goal.status for goal in goals) else []
     overallStatus = 'success' if statuses.length > 0 and _.every(statuses, (s) -> s is 'success' or (ignoreIncomplete and s is null))
     overallStatus = 'failure' if statuses.length > 0 and 'failure' in statuses
     overallStatus

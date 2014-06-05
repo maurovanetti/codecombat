@@ -121,7 +121,7 @@ module.exports = class Handler
         @modelClass.findOne(criteria, project).sort(sort).exec (err, document) ->
           return done(err) if err
           callback(null, document?.toObject() or null)
-          
+
     funcs = {}
     for id in ids
       return errors.badInput(res, "Given an invalid id: #{id}") unless Handler.isID(id)
@@ -153,13 +153,13 @@ module.exports = class Handler
         return @sendDatabaseError(res, err) if err
         @sendSuccess(res, @formatEntity(req, document))
 
+  # project=true or project=name,description,slug for example
   search: (req, res) ->
     unless @modelClass.schema.uses_coco_search
       return @sendNotFoundError(res)
-
     term = req.query.term
     matchedObjects = []
-    filters = [{filter: {index: true}}]
+    filters = if @modelClass.schema.uses_coco_versions or @modelClass.schema.uses_coco_permissions then [filter: {index: true}] else [filter: {}]
     if @modelClass.schema.uses_coco_permissions and req.user
       filters.push {filter: {index: req.user.get('id')}}
     projection = null
@@ -167,7 +167,7 @@ module.exports = class Handler
       projection = PROJECT
     else if req.query.project
       if @modelClass.className is 'User'
-        projection = PROJECTION
+        projection = PROJECT
         log.warn "Whoa, we haven't yet thought about public properties for User projection yet."
       else
         projection = {}
@@ -325,7 +325,8 @@ module.exports = class Handler
         newDocument.save (err) =>
           return @sendDatabaseError(res, err) if err
           @sendSuccess(res, @formatEntity(req, newDocument))
-          @notifyWatchersOfChange(req.user, newDocument, req.body.editPath) if @modelClass.schema.is_patchable
+          if @modelClass.schema.is_patchable
+            @notifyWatchersOfChange(req.user, newDocument, req.headers['x-current-path'])
 
       if major?
         parentDocument.makeNewMinorVersion(updatedObject, major, done)

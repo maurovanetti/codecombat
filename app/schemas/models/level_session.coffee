@@ -113,6 +113,12 @@ _.extend LevelSessionSchema.properties,
     type: 'string'
     default: 'javascript'
     
+  playtime:
+    type: 'number'
+    title: 'Playtime'
+    default: 0
+    description: 'The total playtime on this session'
+    
   teamSpells:
     type: 'object'
     additionalProperties:
@@ -193,6 +199,11 @@ _.extend LevelSessionSchema.properties,
         date: c.date
           title: 'Date computed'
           description: 'The date a match was computed.'
+        playtime:
+          title: 'Playtime so far'
+          description: 'The total seconds of playtime on this session when the match was computed.'
+          type: 'number'
+        
         metrics:
           type: 'object'
           title: 'Metrics'
@@ -212,11 +223,19 @@ _.extend LevelSessionSchema.properties,
               sessionID:
                 title: 'Opponent Session ID'
                 description: 'The session ID of an opponent.'
-                type: ['object', 'string']
+                type: ['object', 'string','null']
               userID:
                 title: 'Opponent User ID'
                 description: 'The user ID of an opponent'
-                type: ['object','string']
+                type: ['object','string','null']
+              name:
+                title: 'Opponent name'
+                description: 'The name of the opponent'
+                type: ['string','null']
+              totalScore:
+                title: 'Opponent total score'
+                description: 'The totalScore of a user when the match was computed'
+                type: ['number','string', 'null']
               metrics:
                 type: 'object'
                 properties:

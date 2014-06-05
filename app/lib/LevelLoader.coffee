@@ -63,12 +63,14 @@ module.exports = class LevelLoader extends CocoClass
       url += "?team=#{@team}" if @team
 
     session = new LevelSession().setURL url
-    @session = @supermodel.loadModel(session, 'level_session', {cache:false}).model
+    @sessionResource = @supermodel.loadModel(session, 'level_session', {cache:false})
+    @session = @sessionResource.model
     @session.once 'sync', -> @url = -> '/db/level.session/' + @id
 
     if @opponentSessionID
       opponentSession = new LevelSession().setURL "/db/level_session/#{@opponentSessionID}"
-      @opponentSession = @supermodel.loadModel(opponentSession, 'opponent_session').model
+      @opponentSessionResource = @supermodel.loadModel(opponentSession, 'opponent_session')
+      @opponentSession = @opponentSessionResource.model
 
   # Supermodel (Level) Loading
 
@@ -111,6 +113,8 @@ module.exports = class LevelLoader extends CocoClass
     @thangIDs = _.uniq thangIDs
     @thangNames = new ThangNamesCollection(@thangIDs)
     worldNecessities.push @supermodel.loadCollection(@thangNames, 'thang_names')
+    worldNecessities.push @sessionResource if @sessionResource?.isLoading
+    worldNecessities.push @opponentSessionResource if @opponentSessionResource?.isLoading
 
     for obj in objUniq componentVersions
       url = "/db/level.component/#{obj.original}/version/#{obj.majorVersion}"
@@ -135,14 +139,16 @@ module.exports = class LevelLoader extends CocoClass
   onWorldNecessitiesLoaded: =>
     @initWorld()
     @supermodel.clearMaxProgress()
+    @trigger 'world-necessities-loaded'
     return if @headless and not @editorMode
-    thangsToLoad = _.uniq( (t.spriteName for t in @world.thangs) )
+    thangsToLoad = _.uniq( (t.spriteName for t in @world.thangs when t.exists) )
     nameModelTuples = ([thangType.get('name'), thangType] for thangType in @thangNames.models)
     nameModelMap = _.zipObject nameModelTuples
     @spriteSheetsToBuild = []
 
     for thangTypeName in thangsToLoad
       thangType = nameModelMap[thangTypeName]
+      continue if thangType.isFullyLoaded()
       thangType.fetch()
       thangType = @supermodel.loadModel(thangType, 'thang').model
       res = @supermodel.addSomethingResource "sprite_sheet", 5
@@ -158,22 +164,34 @@ module.exports = class LevelLoader extends CocoClass
     @supermodel.loadModel(model, resourceName)
 
   onSupermodelLoaded: ->
+    return if @destroyed
     console.log 'SuperModel for Level loaded in', new Date().getTime() - @t0, 'ms'
     @loadLevelSounds()
     @denormalizeSession()
     app.tracker.updatePlayState(@level, @session) unless @headless
-    
+
   buildLoop: =>
-    return if @lastBuilt and new Date().getTime() - @lastBuilt < 10
-    return clearInterval @buildLoopInterval unless @spriteSheetsToBuild.length
-      
+    someLeft = false
     for spriteSheetResource, i in @spriteSheetsToBuild
-      if spriteSheetResource.thangType.loaded
-        @buildSpriteSheetsForThangType spriteSheetResource.thangType
-        @spriteSheetsToBuild.splice i, 1
-        @lastBuilt = new Date().getTime()
-        spriteSheetResource.markLoaded()
-        return
+      continue if spriteSheetResource.spriteSheetKeys
+      someLeft = true
+      thangType = spriteSheetResource.thangType
+      if thangType.loaded and not thangType.loading
+        keys = @buildSpriteSheetsForThangType spriteSheetResource.thangType
+        if keys and keys.length
+          @listenTo spriteSheetResource.thangType, 'build-complete', @onBuildComplete
+          spriteSheetResource.spriteSheetKeys = keys
+        else
+          spriteSheetResource.markLoaded()
+
+    clearInterval @buildLoopInterval unless someLeft
+
+  onBuildComplete: (e) ->
+    resource = null
+    for resource in @spriteSheetsToBuild
+      break if e.thangType is resource.thangType
+    resource.spriteSheetKeys = (k for k in resource.spriteSheetKeys when k isnt e.key)
+    resource.markLoaded() if resource.spriteSheetKeys.length is 0
 
   denormalizeSession: ->
     return if @headless or @sessionDenormalized or @spectateMode
@@ -200,13 +218,16 @@ module.exports = class LevelLoader extends CocoClass
 #      queue = new createjs.LoadQueue()
 #      queue.loadFile('/file/'+f)
     @grabThangTypeTeams() unless @thangTypeTeams
+    keys = []
     for team in @thangTypeTeams[thangType.get('original')] ? [null]
-      spriteOptions = {resolutionFactor: 4, async: false}
+      spriteOptions = {resolutionFactor: SPRITE_RESOLUTION_FACTOR, async: true}
       if thangType.get('kind') is 'Floor'
         spriteOptions.resolutionFactor = 2
       if team and color = @teamConfigs[team]?.color
         spriteOptions.colorConfig = team: color
-      @buildSpriteSheet thangType, spriteOptions
+      key = @buildSpriteSheet thangType, spriteOptions
+      if _.isString(key) then keys.push key
+    keys
 
   grabThangTypeTeams: ->
     @grabTeamConfigs()
@@ -239,6 +260,7 @@ module.exports = class LevelLoader extends CocoClass
     return if @initialized
     @initialized = true
     @world = new World()
+    @world.levelSessionIDs = if @opponentSessionID then [@sessionID, @opponentSessionID] else [@sessionID]
     serializedLevel = @level.serialize(@supermodel)
     @world.loadFromLevel serializedLevel, false
     console.log "World has been initialized from level loader."
@@ -267,7 +289,7 @@ module.exports = class LevelLoader extends CocoClass
   # everything else sound wise is loaded as needed as worlds are generated
 
   progress: -> @supermodel.progress
-    
+
   destroy: ->
     clearInterval @buildLoopInterval if @buildLoopInterval
     super()

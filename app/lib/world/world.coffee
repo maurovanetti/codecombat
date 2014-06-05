@@ -30,8 +30,15 @@ module.exports = class World
     @systems = []
     @systemMap = {}
     @scriptNotes = []
-    @rand = new Rand 0
+    @rand = new Rand 0  # Existence System may change this seed
     @frames = [new WorldFrame(@, 0)]
+
+  destroy: ->
+    @goalManager?.destroy()
+    thang.destroy() for thang in @thangs
+    @[key] = undefined for key of @
+    @destroyed = true
+    @destroy = ->
 
   getFrame: (frameIndex) ->
     # Optimize it a bit--assume we have all if @ended and are at the previous frame otherwise
@@ -85,6 +92,12 @@ module.exports = class World
       frameToLoadUntil = @totalFrames
     i = @frames.length
     while i < frameToLoadUntil
+      if @debugging
+        for thang in @thangs when thang.isProgrammable
+          userCode = @userCodeMap[thang.id] ? {}
+          for methodName, aether of userCode
+            framesToLoadFlowBefore = if methodName is 'plan' then 200 else 1  # Adjust if plan() is taking even longer
+            aether._shouldSkipFlow = i < loadUntilFrame - framesToLoadFlowBefore
       try
         @getFrame(i)
         ++i  # increment this after we have succeeded in getting the frame, otherwise we'll have to do that frame again
@@ -103,6 +116,7 @@ module.exports = class World
           console.log('  Loaded', i, 'of', @totalFrames, "(+" + (t2 - @t0).toFixed(0) + "ms)")
           @t0 = t2
         continueFn = =>
+          return if @destroyed
           if loadUntilFrame
             @loadFrames(loadedCallback,errorCallback,loadProgressCallback, skipDeferredLoading, loadUntilFrame)
           else
@@ -405,7 +419,7 @@ module.exports = class World
         return
     @finishDeserializing w, finishedWorldCallback, perf
 
-  @finishDeserializing: (w, finishedWorldCallback, perf) =>
+  @finishDeserializing: (w, finishedWorldCallback, perf) ->
     perf.t4 = now()
     w.ended = true
     w.getFrame(w.totalFrames - 1).restoreState()

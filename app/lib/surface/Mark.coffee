@@ -20,6 +20,7 @@ module.exports = class Mark extends CocoClass
     @build()
 
   destroy: ->
+    createjs.Tween.removeTweens @mark if @mark
     @mark?.parent?.removeChild @mark
     @markSprite?.destroy()
     @sprite = null
@@ -113,7 +114,7 @@ module.exports = class Mark extends CocoClass
     @mark.regX = width / 2
     @mark.regY = height / 2
     @mark.layerIndex = 10
-    #@mark.cache 0, 0, diameter, diameter  # not actually faster than simple ellipse draw
+    @mark.cache -1, 0, width+2, height # not actually faster than simple ellipse draw
 
   buildRadius: (range) ->
     alpha = 0.15
@@ -180,9 +181,10 @@ module.exports = class Mark extends CocoClass
 
     return @listenToOnce(@thangType, 'sync', @onLoadedThangType) if not @thangType.loaded
     CocoSprite = require './CocoSprite'
-    markSprite = new CocoSprite @thangType, @thangType.spriteOptions
+    # don't bother with making these render async for now, but maybe later for fun and more complexity of code
+    markSprite = new CocoSprite @thangType, {async: false}
     markSprite.queueAction 'idle'
-    @mark = markSprite.displayObject
+    @mark = markSprite.imageObject
     @markSprite = markSprite
 
   loadThangType: ->
@@ -200,12 +202,12 @@ module.exports = class Mark extends CocoClass
     Backbone.Mediator.publish 'sprite:loaded'
 
   update: (pos=null) ->
-    return false unless @on and @mark and @sprite?.thangType.isFullyLoaded()
+    return false unless @on and @mark
+    return false if @sprite? and not @sprite.thangType.isFullyLoaded()
     @mark.visible = not @hidden
     @updatePosition pos
     @updateRotation()
     @updateScale()
-    @mark.advance?()
     if @name is 'highlight' and @highlightDelay and not @highlightTween
       @mark.visible = false
       @highlightTween = createjs.Tween.get(@mark).to({}, @highlightDelay).call =>
@@ -220,7 +222,7 @@ module.exports = class Mark extends CocoClass
         worldZ = @sprite.thang.pos.z - @sprite.thang.depth / 2 + @sprite.getBobOffset()
         @mark.alpha = 0.451 / Math.sqrt(worldZ / 2 + 1)
     else
-      pos ?= @sprite?.displayObject
+      pos ?= @sprite?.imageObject
     @mark.x = pos.x
     @mark.y = pos.y
     if @statusEffect or @name is 'highlight'
@@ -240,17 +242,25 @@ module.exports = class Mark extends CocoClass
       oldMark.parent.addChild @mark
       oldMark.parent.swapChildren oldMark, @mark
       oldMark.parent.removeChild oldMark
+    
+    if @markSprite?
+      @markSprite.scaleFactor = 1.2
+      @markSprite.updateScale()
     return unless @name in ["selection", "target", "repair", "highlight"]
-    scale = 0.5
+    
+    # scale these marks to 10m (100px). Adjust based on sprite size.
+    factor = 0.3 # default size: 3m width, most commonly for target when pointing to a location
+
     if @sprite?.imageObject
-      size = @sprite.getAverageDimension()
-      size += 60 if @name is 'selection'
-      size += 60 if @name is 'repair'
-      size *= @sprite.scaleFactor
-      scale = size / {selection: 128, target: 128, repair: 320, highlight: 160}[@name]
-      if @sprite?.thang.spriteName.search(/(dungeon|indoor).wall/i) isnt -1
-        scale *= 2
-    @mark.scaleX = @mark.scaleY = Math.min 1, scale
+      width = @sprite.imageObject.getBounds()?.width or 0
+      width /= @sprite.options.resolutionFactor
+      # all targets should be set to have a width of 100px, and then be scaled accordingly
+      factor = width / 100 # normalize
+      factor *= 1.1 # add margin
+      factor = Math.max(factor, 0.3) # lower bound
+    @mark.scaleX *= factor
+    @mark.scaleY *= factor
+      
     if @name in ['selection', 'target', 'repair']
       @mark.scaleY *= @camera.y2x  # code applies perspective
 

@@ -5,6 +5,7 @@ BEEN_HERE_BEFORE_KEY = 'beenHereBefore'
 
 init = ->
   module.exports.me = window.me = new User(window.userObject) # inserted into main.html
+  module.exports.me.onLoaded()
   trackFirstArrival()
   if me and not me.get('testGroupNumber')?
     # Assign testGroupNumber to returning visitors; new ones in server/routes/auth
@@ -15,6 +16,7 @@ init = ->
 
 module.exports.createUser = (userObject, failure=backboneFailure, nextURL=null) ->
   user = new User(userObject)
+  user.notyErrors = false
   user.save({}, {
     error: (model,jqxhr,options) ->
       error = parseServerError(jqxhr.responseText)

@@ -103,6 +103,7 @@ module.exports = Surface = class Surface extends CocoClass
     @stage.removeAllChildren()
     @stage.removeEventListener 'stagemousemove', @onMouseMove
     @stage.removeEventListener 'stagemousedown', @onMouseDown
+    @stage.removeEventListener 'stagemouseup', @onMouseUp
     @stage.removeAllEventListeners()
     @stage.enableDOMEvents false
     @stage.enableMouseOver 0
@@ -200,7 +201,7 @@ module.exports = Surface = class Surface extends CocoClass
       createjs.Tween.removeTweens(@)
       @currentFrame = @scrubbingTo
 
-    @scrubbingTo = Math.min(Math.floor(progress * @world.totalFrames), @world.totalFrames)
+    @scrubbingTo = Math.min(Math.round(progress * @world.totalFrames), @world.totalFrames)
     @scrubbingPlaybackSpeed = Math.sqrt(Math.abs(@scrubbingTo - @currentFrame) * @world.dt / (scrubDuration or 0.5))
     if scrubDuration
       t = createjs.Tween
@@ -249,7 +250,7 @@ module.exports = Surface = class Surface extends CocoClass
 
   onSetCamera: (e) ->
     if e.thangID
-      return unless target = @spriteBoss.spriteFor(e.thangID)?.displayObject
+      return unless target = @spriteBoss.spriteFor(e.thangID)?.imageObject
     else if e.pos
       target = @camera.worldToSurface e.pos
     else
@@ -281,6 +282,7 @@ module.exports = Surface = class Surface extends CocoClass
 
   onSetPlaying: (e) ->
     @playing = (e ? {}).playing ? true
+    @setPlayingCalled = true
     if @playing and @currentFrame >= (@world.totalFrames - 5)
       @currentFrame = 0
     if @fastForwarding and not @playing
@@ -352,6 +354,7 @@ module.exports = Surface = class Surface extends CocoClass
     @casting = true
     @wasPlayingWhenCastingBegan = @playing
     Backbone.Mediator.publish 'level-set-playing', { playing: false }
+    @setPlayingCalled = false # don't overwrite playing settings if they changed by, say, scripts
 
     if @coordinateDisplay?
       @surfaceTextLayer.removeChild @coordinateDisplay
@@ -370,7 +373,7 @@ module.exports = Surface = class Surface extends CocoClass
 
     # This has a tendency to break scripts that are waiting for playback to change when the level is loaded
     # so only run it after the first world is created.
-    Backbone.Mediator.publish 'level-set-playing', { playing: @wasPlayingWhenCastingBegan } unless event.firstWorld
+    Backbone.Mediator.publish 'level-set-playing', { playing: @wasPlayingWhenCastingBegan } unless event.firstWorld or @setPlayingCalled
 
     fastForwardTo = null
     if @playing
@@ -400,7 +403,7 @@ module.exports = Surface = class Surface extends CocoClass
     canvasWidth = parseInt @canvas.attr('width'), 10
     canvasHeight = parseInt @canvas.attr('height'), 10
     @camera?.destroy()
-    @camera = new Camera canvasWidth, canvasHeight
+    @camera = new Camera @canvas
     AudioPlayer.camera = @camera
     @layers.push @surfaceLayer = new Layer name: "Surface", layerPriority: 0, transform: Layer.TRANSFORM_SURFACE, camera: @camera
     @layers.push @surfaceTextLayer = new Layer name: "Surface Text", layerPriority: 1, transform: Layer.TRANSFORM_SURFACE_TEXT, camera: @camera
@@ -414,6 +417,7 @@ module.exports = Surface = class Surface extends CocoClass
     @stage.enableMouseOver(10)
     @stage.addEventListener 'stagemousemove', @onMouseMove
     @stage.addEventListener 'stagemousedown', @onMouseDown
+    @canvas[0].addEventListener 'mouseup', @onMouseUp
     @canvas.on 'mousewheel', @onMouseWheel
     @hookUpChooseControls() if @options.choosing
     createjs.Ticker.timingMode = createjs.Ticker.RAF_SYNCHED
@@ -425,6 +429,10 @@ module.exports = Surface = class Surface extends CocoClass
     oldHeight = parseInt @canvas.attr('height'), 10
     newWidth = @canvas.width()
     newHeight = @canvas.height()
+    return unless newWidth > 0 and newHeight > 0
+    #if InstallTrigger?  # Firefox rendering performance goes down as canvas size goes up
+    #  newWidth = Math.min 924, newWidth
+    #  newHeight = Math.min 589, newHeight
     @canvas.attr width: newWidth, height: newHeight
     @stage.scaleX *= newWidth / oldWidth
     @stage.scaleY *= newHeight / oldHeight
@@ -533,6 +541,11 @@ module.exports = Surface = class Surface extends CocoClass
     onBackground = not @stage.hitTest e.stageX, e.stageY
     Backbone.Mediator.publish 'surface:stage-mouse-down', onBackground: onBackground, x: e.stageX, y: e.stageY, originalEvent: e
 
+  onMouseUp: (e) =>
+    return if @disabled
+    onBackground = not @stage.hitTest e.stageX, e.stageY
+    Backbone.Mediator.publish 'surface:stage-mouse-up', onBackground: onBackground, x: e.stageX, y: e.stageY, originalEvent: e
+
   onMouseWheel: (e) =>
     # https://github.com/brandonaaron/jquery-mousewheel
     e.preventDefault()
@@ -541,6 +554,7 @@ module.exports = Surface = class Surface extends CocoClass
       deltaX: e.deltaX
       deltaY: e.deltaY
       screenPos: @mouseScreenPos
+      canvas: @canvas
     Backbone.Mediator.publish 'surface:mouse-scrolled', event unless @disabled
 
   hookUpChooseControls: ->
@@ -586,12 +600,14 @@ module.exports = Surface = class Surface extends CocoClass
       @mouseInBounds = mib
 
   restoreWorldState: ->
-    @world.getFrame(@getCurrentFrame()).restoreState()
+    frame = @world.getFrame(@getCurrentFrame())
+    frame.restoreState()
     current = Math.max(0, Math.min(@currentFrame, @world.totalFrames - 1))
     if current - Math.floor(current) > 0.01
       next = Math.ceil current
       ratio = current % 1
       @world.frames[next].restorePartialState ratio if next > 1
+    frame.clearEvents() if parseInt(@currentFrame) is parseInt(@lastFrame)
     @spriteBoss.updateSounds()
 
   updateState: (frameChanged) ->

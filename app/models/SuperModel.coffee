@@ -17,6 +17,16 @@ module.exports = class SuperModel extends Backbone.Model
   # necessarily have the same model or collection that was passed in, if it was fetched from
   # the cache.
 
+  report: ->
+    # Useful for debugging why a SuperModel never finishes loading.
+    console.info "SuperModel report ------------------------"
+    console.info "#{_.values(@resources).length} resources."
+    unfinished = []
+    for resource in _.values(@resources) when resource
+      console.info '\t', resource.name, "loaded", resource.isLoaded
+      unfinished.push resource unless resource.isLoaded
+    unfinished
+
   loadModel: (model, name, fetchOptions, value=1) ->
     cachedModel = @getModelByURL(model.getURL())
     if cachedModel
@@ -118,6 +128,9 @@ module.exports = class SuperModel extends Backbone.Model
     @storeResource(res, value)
     return res
 
+  removeModelResource: (modelOrCollection) ->
+    @removeResource _.find(@resources, (resource) -> resource?.model is modelOrCollection)
+
   addRequestResource: (name, jqxhrOptions, value=1) ->
     @checkName(name)
     res = new RequestResource(name, jqxhrOptions, value)
@@ -143,12 +156,23 @@ module.exports = class SuperModel extends Backbone.Model
     @denom += value
     _.defer @updateProgress if @denom
 
-  onResourceLoaded: (r) ->
-    @num += r.value
+  removeResource: (resource) ->
+    return unless @resources[resource.rid]
+    @resources[resource.rid] = null
+    --@num if resource.isLoaded
+    --@denom
     _.defer @updateProgress
 
-  onResourceFailed: (source) ->
-    @trigger('failed', source)
+  onResourceLoaded: (r) ->
+    return unless @resources[r.rid]
+    @num += r.value
+    _.defer @updateProgress
+    r.clean()
+
+  onResourceFailed: (r) ->
+    return unless @resources[r.rid]
+    @trigger('failed', resource: r)
+    r.clean()
 
   updateProgress: =>
     # Because this is _.defer'd, this might end up getting called after
@@ -160,13 +184,13 @@ module.exports = class SuperModel extends Backbone.Model
     @progress = newProg
     @trigger('update-progress', @progress)
     @trigger('loaded-all') if @finished()
-    
+
   setMaxProgress: (@maxProgress) ->
   resetProgress: -> @progress = 0
   clearMaxProgress: ->
     @maxProgress = 1
     _.defer @updateProgress
-    
+
   getProgress: -> return @progress
 
   getResource: (rid) ->
@@ -192,13 +216,17 @@ class Resource extends Backbone.Model
 
   markFailed: ->
     return if @isLoaded
-    @trigger('failed', {resource: @})
+    @trigger('failed', @)
     @isLoaded = @isLoading = false
     @isFailed = true
 
   markLoading: ->
     @isLoaded = @isFailed = false
     @isLoading = true
+
+  clean: ->
+    # request objects get rather large. Clean them up after the request is finished.
+    @jqxhr = null
 
   load: -> @
 
@@ -221,6 +249,9 @@ class ModelResource extends Resource
     @listenToOnce @model, 'sync', -> @markLoaded()
     @listenToOnce @model, 'error', -> @markFailed()
 
+  clean: ->
+    @jqxhr = null
+    @model.jqxhr = null
 
 
 class RequestResource extends Resource

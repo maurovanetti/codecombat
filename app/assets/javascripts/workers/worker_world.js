@@ -188,10 +188,17 @@ self.retrieveValueFromFrame = function retrieveValueFromFrame(args) {
             {
                 try
                 {
-                    var flowStates = self.debugWorld.userCodeMap[currentThangID][currentSpellID].flow.states;
-                    //we have to go to the second last flowState as we run the world for one additional frame
-                    //to collect the flow
-                    value = _.last(flowStates[flowStates.length - 1].statements).variables[prop];
+                    if (Aether.globals[prop])
+                    {
+                        value = Aether.globals[prop];
+                    }
+                    else
+                    {
+                        var flowStates = self.debugWorld.userCodeMap[currentThangID][currentSpellID].flow.states;
+                        //we have to go to the second last flowState as we run the world for one additional frame
+                        //to collect the flow
+                        value = _.last(flowStates[flowStates.length - 1].statements).variables[prop];
+                    }
                 }
                 catch (e)
                 {
@@ -238,13 +245,13 @@ self.retrieveValueFromFrame = function retrieveValueFromFrame(args) {
 
 self.enableFlowOnThangSpell = function (thangID, spellID, userCodeMap) {
     try {
-        if (userCodeMap[thangID][spellID].originalOptions.includeFlow === true &&
-            userCodeMap[thangID][spellID].originalOptions.noSerializationInFlow === true)
+        var options = userCodeMap[thangID][spellID].originalOptions;
+        if (options.includeFlow === true && options.noSerializationInFlow === true)
             return;
         else
         {
-            userCodeMap[thangID][spellID].originalOptions.includeFlow = true;
-            userCodeMap[thangID][spellID].originalOptions.noSerializationInFlow = true;
+            options.includeFlow = true;
+            options.noSerializationInFlow = true;
             var temporaryAether = Aether.deserialize(userCodeMap[thangID][spellID]);
             temporaryAether.transpile(temporaryAether.raw);
             userCodeMap[thangID][spellID] = temporaryAether.serialize();
@@ -259,7 +266,6 @@ self.enableFlowOnThangSpell = function (thangID, spellID, userCodeMap) {
 self.setupDebugWorldToRunUntilFrame = function (args) {
     self.debugPostedErrors = {};
     self.debugt0 = new Date();
-    self.debugPostedErrors = false;
     self.logsLogged = 0;
 
     var stringifiedUserCodeMap = JSON.stringify(args.userCodeMap);
@@ -268,6 +274,7 @@ self.setupDebugWorldToRunUntilFrame = function (args) {
     if (!self.debugWorld || userCodeMapHasChanged || args.frame < self.currentDebugWorldFrame) {
         try {
             self.debugWorld = new World(args.userCodeMap);
+            self.debugWorld.levelSessionIDs = args.levelSessionIDs;
             if (args.level)
                 self.debugWorld.loadFromLevel(args.level, true);
             self.debugWorld.debugging = true;
@@ -282,6 +289,7 @@ self.setupDebugWorldToRunUntilFrame = function (args) {
             return;
         }
         Math.random = self.debugWorld.rand.randf;  // so user code is predictable
+        Aether.replaceBuiltin("Math", Math);
     }
     self.debugWorld.totalFrames = args.frame; //hack to work around error checking
     self.currentDebugWorldFrame = args.frame;
@@ -307,6 +315,7 @@ self.onDebugWorldProgress = function onDebugWorldProgress(progress) {
 self.debugAbort = function () {
     if(self.debugWorld) {
         self.debugWorld.abort();
+        self.debugWorld.destroy();
         self.debugWorld = null;
     }
     self.postMessage({type: 'debug-abort'});
@@ -315,11 +324,11 @@ self.debugAbort = function () {
 self.runWorld = function runWorld(args) {
   self.postedErrors = {};
   self.t0 = new Date();
-  self.postedErrors = false;
   self.logsLogged = 0;
 
   try {
     self.world = new World(args.userCodeMap);
+    self.world.levelSessionIDs = args.levelSessionIDs;
     if(args.level)
       self.world.loadFromLevel(args.level, true);
     self.world.preloading = args.preload;
@@ -335,6 +344,7 @@ self.runWorld = function runWorld(args) {
     return;
   }
   Math.random = self.world.rand.randf;  // so user code is predictable
+  Aether.replaceBuiltin("Math", Math);
   self.postMessage({type: 'start-load-frames'});
   self.world.loadFrames(self.onWorldLoaded, self.onWorldError, self.onWorldLoadProgress);
 };
@@ -369,6 +379,8 @@ self.onWorldLoaded = function onWorldLoaded() {
   }
   var t3 = new Date();
   console.log("And it was so: (" + (diff / self.world.totalFrames).toFixed(3) + "ms per frame,", self.world.totalFrames, "frames)\nSimulation   :", diff + "ms \nSerialization:", (t2 - t1) + "ms\nDelivery     :", (t3 - t2) + "ms");
+  self.world.goalManager.destroy();
+  self.world.destroy();
   self.world = null;
 };
 
@@ -382,6 +394,7 @@ self.onWorldError = function onWorldError(error) {
   }
   else {
     console.log("Non-UserCodeError:", error.toString() + "\n" + error.stack || error.stackTrace);
+    self.postMessage({type: 'non-user-code-problem', problem: {message: error.toString()}});
   }
   /*  We don't actually have the recoverable property any more; hmm
   if(!error.recoverable) {
@@ -399,6 +412,8 @@ self.onWorldLoadProgress = function onWorldLoadProgress(progress) {
 self.abort = function abort() {
   if(self.world) {
     self.world.abort();
+    self.world.goalManager.destroy();
+    self.world.destroy();
     self.world = null;
   }
   self.postMessage({type: 'abort'});

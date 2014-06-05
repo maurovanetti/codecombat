@@ -18,9 +18,10 @@ module.exports = class SpellView extends View
   editModes:
     'javascript': 'ace/mode/javascript'
     'coffeescript': 'ace/mode/coffee'
+    'python': 'ace/mode/python'
     'clojure': 'ace/mode/clojure'
     'lua': 'ace/mode/lua'
-    'python': 'ace/mode/lua'
+    'io': 'ace/mode/text'
 
   keyBindings:
     'default': null
@@ -34,6 +35,7 @@ module.exports = class SpellView extends View
     'surface:coordinate-selected': 'onCoordinateSelected'
     'god:new-world-created': 'onNewWorld'
     'god:user-code-problem': 'onUserCodeProblem'
+    'god:non-user-code-problem': 'onNonUserCodeProblem'
     'tome:manual-cast': 'onManualCast'
     'tome:reload-code': 'onCodeReload'
     'tome:spell-changed': 'onSpellChanged'
@@ -76,7 +78,7 @@ module.exports = class SpellView extends View
     @aceSession = @ace.getSession()
     @aceDoc = @aceSession.getDocument()
     @aceSession.setUseWorker false
-    @aceSession.setMode @editModes[aceConfig.language ? 'javascript']
+    @aceSession.setMode @editModes[@spell.language]
     @aceSession.setWrapLimitRange null
     @aceSession.setUseWrapMode true
     @aceSession.setNewLineMode "unix"
@@ -153,6 +155,11 @@ module.exports = class SpellView extends View
       name: 'spell-beautify'
       bindKey: {win: 'Ctrl-Shift-B', mac: 'Command-Shift-B|Ctrl-Shift-B'}
       exec: -> Backbone.Mediator.publish 'spell-beautify'
+    addCommand
+      name: 'prevent-line-jump'
+      bindKey: {win: 'Ctrl-L', mac: 'Command-L'}
+      passEvent: true
+      exec: ->  # just prevent default ACE go-to-line alert
 
   fillACE: ->
     @ace.setValue @spell.source
@@ -360,7 +367,7 @@ module.exports = class SpellView extends View
   displayAether: (aether) ->
     @displayedAether = aether
     isCast = not _.isEmpty(aether.metrics) or _.some aether.problems.errors, {type: 'runtime'}
-    isCast = isCast or (me.get('aceConfig') ? {})['language'] isnt 'javascript'  # Since we don't have linting for other languages
+    isCast = isCast or @spell.language isnt 'javascript'  # Since we don't have linting for other languages
     problem.destroy() for problem in @problems  # Just in case another problem was added since clearAetherDisplay() ran.
     @problems = []
     annotations = []
@@ -435,9 +442,18 @@ module.exports = class SpellView extends View
       @lastUpdatedAetherSpellThang = null  # force a refresh without a re-transpile
       @updateAether false, false
 
+  onNonUserCodeProblem: (e) ->
+    return unless @spellThang
+    problem = @spellThang.aether.createUserCodeProblem type: 'runtime', kind: 'Unhandled', message: "Unhandled error: #{e.problem.message}"
+    @spellThang.aether.addProblem problem
+    @spellThang.castAether?.addProblem problem
+    @lastUpdatedAetherSpellThang = null  # force a refresh without a re-transpile
+    @updateAether false, false  # TODO: doesn't work, error doesn't display
+
   onInfiniteLoop: (e) ->
     return unless @spellThang
     @spellThang.aether.addProblem e.problem
+    @spellThang.castAether?.addProblem e.problem
     @lastUpdatedAetherSpellThang = null  # force a refresh without a re-transpile
     @updateAether false, false
 
@@ -601,16 +617,14 @@ module.exports = class SpellView extends View
     @ace.setDisplayIndentGuides aceConfig.indentGuides # default false
     @ace.setShowInvisibles aceConfig.invisibles # default false
     @ace.setKeyboardHandler @keyBindings[aceConfig.keyBindings ? 'default']
-  # @aceSession.setMode @editModes[aceConfig.language ? 'javascript']
 
   onChangeLanguage: (e) ->
-    aceConfig = me.get('aceConfig') ? {}
-    @aceSession.setMode @editModes[aceConfig.language ? 'javascript']
+    if @spell.canWrite()
+      @aceSession.setMode @editModes[e.language]
 
   dismiss: ->
     @spell.hasChangedSignificantly @getSource(), null, (hasChanged) =>
       @recompile() if hasChanged
-
 
   destroy: ->
     $(@ace?.container).find('.ace_gutter').off 'click', '.ace_error, .ace_warning, .ace_info', @onAnnotationClick

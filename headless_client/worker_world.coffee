@@ -78,6 +78,7 @@ work = () ->
 
     try
       self.world = new World(args.userCodeMap)
+      self.world.levelSessionIDs = args.levelSessionIDs
       self.world.loadFromLevel args.level, true  if args.level
       self.world.headless = args.headless
       self.goalManager = new GoalManager(self.world)
@@ -90,6 +91,7 @@ work = () ->
       self.onWorldError error
       return
     Math.random = self.world.rand.randf # so user code is predictable
+    Aether.replaceBuiltin("Math", Math)
     console.log "Loading frames."
 
     self.postMessage type: "start-load-frames"

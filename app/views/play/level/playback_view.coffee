@@ -3,6 +3,7 @@ template = require 'templates/play/level/playback'
 {me} = require 'lib/auth'
 
 EditorConfigModal = require './modal/editor_config_modal'
+KeyboardShortcutsModal = require './modal/keyboard_shortcuts_modal'
 
 module.exports = class PlaybackView extends View
   id: "playback-view"
@@ -29,6 +30,7 @@ module.exports = class PlaybackView extends View
     'click #grid-toggle': 'onToggleGrid'
     'click #edit-wizard-settings': 'onEditWizardSettings'
     'click #edit-editor-config': 'onEditEditorConfig'
+    'click #view-keyboard-shortcuts': 'onViewKeyboardShortcuts'
     'click #music-button': 'onToggleMusic'
     'click #zoom-in-button': -> Backbone.Mediator.publish('camera-zoom-in') unless @shouldIgnore()
     'click #zoom-out-button': -> Backbone.Mediator.publish('camera-zoom-out') unless @shouldIgnore()
@@ -42,7 +44,10 @@ module.exports = class PlaybackView extends View
   shortcuts:
     '⌘+p, p, ctrl+p': 'onTogglePlay'
     '⌘+[, ctrl+[': 'onScrubBack'
+    '⌘+⇧+[, ctrl+⇧+[': 'onSingleScrubBack'
     '⌘+], ctrl+]': 'onScrubForward'
+    '⌘+⇧+], ctrl+⇧+]': 'onSingleScrubForward'
+
 
   # popover that shows at the current mouse position on the progressbar, using the bootstrap popover.
   # Could make this into a jQuery plugins itself theoretically.
@@ -156,16 +161,14 @@ module.exports = class PlaybackView extends View
 
     @timePopup ?= new HoverPopup
 
-
-    #TODO: Why do we need defaultValues here at all? Fallback language has been set to 'en'... oO
     t = $.i18n.t
-    @second = t 'units.second', defaultValue: 'second'
-    @seconds = t 'units.seconds', defaultValue: 'seconds'
-    @minute = t 'units.minute', defaultValue: 'minute'
-    @minutes = t 'units.minutes', defaultValue: 'minutes'
-    @goto = t 'play_level.time_goto', defaultValue: "Go to:"
-    @current = t 'play_level.time_current', defaultValue: "Now:"
-    @total = t 'play_level.time_total', defaultValue: "Max:"
+    @second = t 'units.second'
+    @seconds = t 'units.seconds'
+    @minute = t 'units.minute'
+    @minutes = t 'units.minutes'
+    @goto = t 'play_level.time_goto'
+    @current = t 'play_level.time_current'
+    @total = t 'play_level.time_total'
 
   onToggleDebug: ->
     return if @shouldIgnore()
@@ -181,7 +184,10 @@ module.exports = class PlaybackView extends View
     Backbone.Mediator.publish 'edit-wizard-settings'
 
   onEditEditorConfig: ->
-    @openModalView(new EditorConfigModal())
+    @openModalView new EditorConfigModal session: @options.session
+
+  onViewKeyboardShortcuts: ->
+    @openModalView new KeyboardShortcutsModal()
 
   onCastSpells: (e) ->
     return if e.preload
@@ -194,8 +200,8 @@ module.exports = class PlaybackView extends View
       $('button', @$el).addClass('disabled')
       try
         @$progressScrubber.slider('disable', true)
-      catch e
-        #console.warn('error disabling scrubber')
+      catch error
+        console.warn('error disabling scrubber', error)
       @timePopup?.disable()
     $('#volume-button', @$el).removeClass('disabled')
 
@@ -205,8 +211,8 @@ module.exports = class PlaybackView extends View
       $('button', @$el).removeClass('disabled')
       try
         @$progressScrubber.slider('enable', true)
-      catch e
-        #console.warn('error enabling scrubber')
+      catch error
+        console.warn('error enabling scrubber', error)
       @timePopup?.enable()
 
   onSetPlaying: (e) ->
@@ -226,13 +232,22 @@ module.exports = class PlaybackView extends View
     button.addClass(classes[1]) if e.volume > 0.0 and e.volume < 1.0
     button.addClass(classes[2]) if e.volume >= 1.0
 
-  onScrubForward: (e) ->
+  onScrub: (e, options) ->
     e?.preventDefault()
-    Backbone.Mediator.publish('level-set-time', ratioOffset: 0.05, scrubDuration: 500)
+    options.scrubDuration = 500
+    Backbone.Mediator.publish('level-set-time', options)
+
+  onScrubForward: (e) ->
+    @onScrub e, ratioOffset: 0.05
+
+  onSingleScrubForward: (e) ->
+    @onScrub e, frameOffset: 1
 
   onScrubBack: (e) ->
-    e?.preventDefault()
-    Backbone.Mediator.publish('level-set-time', ratioOffset: -0.05, scrubDuration: 500)
+    @onScrub e, ratioOffset: -0.05
+
+  onSingleScrubBack: (e) ->
+    @onScrub e, frameOffset: -1
 
   onFrameChanged: (e) ->
     if e.progress isnt @lastProgress

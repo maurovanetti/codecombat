@@ -5,8 +5,12 @@ locale = require 'locale/locale'
 {me} = require 'lib/auth'
 Tracker = require 'lib/Tracker'
 CocoView = require 'views/kinds/CocoView'
+AchievementNotify = require '../../templates/achievement_notify'
 
 marked.setOptions {gfm: true, sanitize: true, smartLists: true, breaks: false}
+
+# TODO, add C-style macro constants like this?
+window.SPRITE_RESOLUTION_FACTOR = 4
 
 # Prevent Ctrl/Cmd + [ / ], P, S
 ctrlDefaultPrevented = [219, 221, 80, 83]
@@ -36,6 +40,7 @@ Application = initialize: ->
   @facebookHandler = new FacebookHandler()
   @gplusHandler = new GPlusHandler()
   $(document).bind 'keydown', preventBackspace
+  $.notify.addStyle 'achievement', html: $(AchievementNotify())
   @linkedinHandler = new LinkedInHandler()
   preload(COMMON_FILES)
   $.i18n.init {

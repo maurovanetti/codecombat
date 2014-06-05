@@ -100,10 +100,8 @@ module.exports = class ThangTypeEditView extends View
   initStage: ->
     canvas = @$el.find('#canvas')
     @stage = new createjs.Stage(canvas[0])
-    canvasWidth = parseInt(canvas.attr('width'), 10)
-    canvasHeight = parseInt(canvas.attr('height'), 10)
     @camera?.destroy()
-    @camera = new Camera canvasWidth, canvasHeight
+    @camera = new Camera canvas
 
     @torsoDot = @makeDot('blue')
     @mouthDot = @makeDot('yellow')
@@ -212,7 +210,7 @@ module.exports = class ThangTypeEditView extends View
     sprite = new CocoSprite(@thangType, @getSpriteOptions())
     @currentSprite?.destroy()
     @currentSprite = sprite
-    @showDisplayObject(sprite.displayObject)
+    @showImageObject(sprite.imageObject)
     @updateScale()
 
   showAnimation: (animationName) ->
@@ -223,8 +221,8 @@ module.exports = class ThangTypeEditView extends View
       @showMovieClip(animationName)
     else
       @showSprite(animationName)
-    @updateScale()
     @updateRotation()
+    @updateScale() # must happen after update rotation, because updateRotation calls the sprite update() method.
 
   showMovieClip: (animationName) ->
     vectorParser = new SpriteBuilder(@thangType)
@@ -234,7 +232,7 @@ module.exports = class ThangTypeEditView extends View
     if reg
       movieClip.regX = -reg.x
       movieClip.regY = -reg.y
-    @showDisplayObject(movieClip)
+    @showImageObject(movieClip)
 
   getSpriteOptions: -> { resolutionFactor: @resolution, thang: @mockThang}
 
@@ -244,7 +242,7 @@ module.exports = class ThangTypeEditView extends View
     sprite.queueAction(actionName)
     @currentSprite?.destroy()
     @currentSprite = sprite
-    @showDisplayObject(sprite.displayObject)
+    @showImageObject(sprite.imageObject)
 
   updatePortrait: ->
     options = @getSpriteOptions()
@@ -254,12 +252,12 @@ module.exports = class ThangTypeEditView extends View
     portrait.addClass 'img-thumbnail'
     $('#portrait').replaceWith(portrait)
 
-  showDisplayObject: (displayObject) ->
+  showImageObject: (imageObject) ->
     @clearDisplayObject()
-    displayObject.x = CENTER.x
-    displayObject.y = CENTER.y
-    @stage.addChildAt(displayObject, 1)
-    @currentObject = displayObject
+    imageObject.x = CENTER.x
+    imageObject.y = CENTER.y
+    @stage.addChildAt(imageObject, 1)
+    @currentObject = imageObject
     @updateDots()
 
   clearDisplayObject: ->
@@ -281,11 +279,16 @@ module.exports = class ThangTypeEditView extends View
       @currentSprite.update(true)
 
   updateScale: =>
-    value = (@scaleSlider.slider('value') + 1) / 10
-    fixed = value.toFixed(1)
-    @scale = value
+    resValue = (@resolutionSlider.slider('value') + 1) / 10
+    scaleValue = (@scaleSlider.slider('value') + 1) / 10
+    fixed = scaleValue.toFixed(1)
+    @scale = scaleValue
     @$el.find('.scale-label').text " #{fixed}x "
-    @currentObject.scaleX = @currentObject.scaleY = value if @currentObject?
+    if @currentSprite
+      @currentSprite.scaleFactor = scaleValue
+      @currentSprite.updateScale()
+    else if @currentObject?
+      @currentObject.scaleX = @currentObject.scaleY = scaleValue / resValue
     @updateGrid()
     @updateDots()
 
@@ -381,7 +384,7 @@ module.exports = class ThangTypeEditView extends View
       bounds = obj.frameBounds[0]
       obj.regX = bounds.x + bounds.width / 2
       obj.regY = bounds.y + bounds.height / 2
-    @showDisplayObject(obj) if obj
+    @showImageObject(obj) if obj
     obj.y = 200 if obj # truly center the container
     @showingSelectedNode = true
     @currentSprite?.destroy()
