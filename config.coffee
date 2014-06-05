@@ -45,9 +45,6 @@ exports.config =
           'bower_components/jquery/dist/jquery.js'
           'bower_components/lodash/dist/lodash.js'
           'bower_components/backbone/backbone.js'
-          'vendor/scripts/jasmine.js'
-          'vendor/scripts/jasmine-html.js'
-          'vendor/scripts/boot.js'
           # Twitter Bootstrap jquery plugins
           'bower_components/bootstrap/dist/bootstrap.js'
           # CreateJS dependencies

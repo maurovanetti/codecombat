@@ -5,13 +5,21 @@ module.exports = class TestView extends CocoView
   id: "test-view"
   template: template
 
-  constructor: (options, subpath) ->
+  constructor: (options, @subpath) ->
     super(options)
-    console.log 'subpath', subpath
+    @loadJasmine()
+
+  loadJasmine: ->
+    @queue = new createjs.LoadQueue()
+    @queue.on('complete', @scriptsLoaded, @)
+    for f in ['jasmine', 'jasmine-html', 'boot']
+      @queue.loadFile({
+        src: "/javascripts/#{f}.js"
+        type: createjs.LoadQueue.JAVASCRIPT
+      })
+    
+  scriptsLoaded: ->
     allFiles = window.require.list()
-    console.log 'files', allFiles.length
     specFiles = (f for f in allFiles when f.indexOf('.spec') > -1)
-    console.log 'spec files', specFiles
-    subset = (f for f in specFiles when f.startsWith subpath)
-    console.log 'subset', subset
+    subset = (f for f in specFiles when f.startsWith @subpath)
     require f for f in subset # runs the tests
