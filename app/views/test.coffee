@@ -19,9 +19,17 @@ module.exports = class TestView extends CocoView
       })
     
   scriptsLoaded: ->
-    allFiles = window.require.list()
-    specFiles = (f for f in allFiles when f.indexOf('.spec') > -1)
-    if @subPath
-      prefix = 'test/app/'+@subpath
-      specFiles = (f for f in specFiles when f.startsWith prefix)
-    require f for f in specFiles # runs the tests
+    console.info 'All scripts are now loaded'
+    @runTests()
+    
+  runTests: ->
+    describe 'CodeCombat Client', =>
+      beforeEach ->
+        # TODO get some setup and teardown prepped
+      
+      allFiles = window.require.list()
+      specFiles = (f for f in allFiles when f.indexOf('.spec') > -1)
+      if @subpath
+        prefix = 'test/app/'+@subpath
+        specFiles = (f for f in specFiles when f.startsWith prefix)
+      require f for f in specFiles # runs the tests
