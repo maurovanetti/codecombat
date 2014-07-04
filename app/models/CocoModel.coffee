@@ -17,10 +17,10 @@ class CocoModel extends Backbone.Model
     super()
     if not @constructor.className
       console.error("#{@} needs a className set.")
-    @markToRevert()
     @addSchemaDefaults()
     @on 'sync', @onLoaded, @
     @on 'error', @onError, @
+    @on 'add', @onLoaded, @
     @saveBackup = _.debounce(@saveBackup, 500)
 
   type: ->
@@ -40,14 +40,15 @@ class CocoModel extends Backbone.Model
     @loaded = true
     @loading = false
     @jqxhr = null
-    @markToRevert()
     @loadFromBackup()
 
   getNormalizedURL: -> "#{@urlRoot}/#{@id}"
 
   set: ->
+    inFlux = @loading or not @loaded
+    @markToRevert() unless inFlux or @_revertAttributes
     res = super(arguments...)
-    @saveBackup() if @saveBackups and @loaded and @hasLocalChanges()
+    @saveBackup() if @saveBackups and (not inFlux) and @hasLocalChanges()
     res
 
   loadFromBackup: ->
@@ -57,28 +58,37 @@ class CocoModel extends Backbone.Model
       @set(existing, {silent:true})
       CocoModel.backedUp[@id] = @
 
-  saveBackup: ->
+  saveBackup: -> @saveBackupNow()
+    
+  saveBackupNow: ->
     storage.save(@id, @attributes)
     CocoModel.backedUp[@id] = @
 
   @backedUp = {}
   schema: -> return @constructor.schema
 
+  getValidationErrors: ->
+    errors = tv4.validateMultiple(@attributes, @constructor.schema or {}).errors
+    return errors if errors?.length
+
   validate: ->
-    result = tv4.validateMultiple(@attributes, @constructor.schema? or {})
-    if result.errors?.length
-      console.log @, "got validate result with errors:", result
-    return result.errors unless result.valid
+    errors = @getValidationErrors()
+    if errors?.length
+      console.debug "Validation failed for #{@constructor.className}: '#{@get('name') or @}'."
+      for error in errors
+        console.debug "\t", error.dataPath, ":", error.message
+      return errors
 
   save: (attrs, options) ->
-    @set 'editPath', document.location.pathname
     options ?= {}
+    options.headers ?= {}
+    options.headers['X-Current-Path'] = document.location.pathname
     success = options.success
     error = options.error
     options.success = (model, res) =>
       @trigger "save:success", @
       success(@, res) if success
-      @markToRevert()
+      @markToRevert() if @_revertAttributes
       @clearBackup()
       CocoModel.pollAchievements()
     options.error = (model, res) =>
@@ -90,13 +100,28 @@ class CocoModel extends Backbone.Model
     @trigger "save", @
     return super attrs, options
 
+  patch: (options) ->
+    return false unless @_revertAttributes
+    options ?= {}
+    options.patch = true
+
+    attrs = {_id: @id}
+    keys = []
+    for key in _.keys @attributes
+      unless _.isEqual @attributes[key], @_revertAttributes[key]
+        attrs[key] = @attributes[key]
+        keys.push key
+
+    return unless keys.length
+    console.debug 'Patching', @get('name') or @, keys
+    @save(attrs, options)
+
   fetch: ->
     @jqxhr = super(arguments...)
     @loading = true
     @jqxhr
 
   markToRevert: ->
-    return unless @saveBackups
     if @type() is 'ThangType'
       @_revertAttributes = _.clone @attributes  # No deep clones for these!
     else
@@ -145,7 +170,6 @@ class CocoModel extends Backbone.Model
       #console.log "setting", prop, "to", sch.default, "from sch.default" if sch.default?
       @set prop, sch.default if sch.default?
     if @loaded
-      @markToRevert()
       @loadFromBackup()
 
   @isObjectID: (s) ->
@@ -185,8 +209,13 @@ class CocoModel extends Backbone.Model
 
   applyDelta: (delta) ->
     newAttributes = $.extend(true, {}, @attributes)
-    jsondiffpatch.patch newAttributes, delta
+    try
+      jsondiffpatch.patch newAttributes, delta
+    catch error
+      console.error "Error applying delta", delta, "to attributes", newAttributes, error
+      return false
     @set newAttributes
+    return true
 
   getExpandedDelta: ->
     delta = @getDelta()
@@ -266,7 +295,9 @@ class CocoModel extends Backbone.Model
     achievements = new NewAchievementCollection
     achievements.fetch(
       success: (collection) ->
-        Backbone.Mediator.publish('achievements:new', collection) unless _.isEmpty(collection.models)
+        me.fetch (success: -> Backbone.Mediator.publish('achievements:new', collection)) unless _.isEmpty(collection.models)
+      error: (collection, res, options) ->
+        console.error 'Miserably failed to fetch unnotified achievements'
     )
 
 

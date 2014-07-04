@@ -35,7 +35,7 @@ module.exports = class CastButtonView extends View
     @castOptions = $('.autocast-delays', @$el)
     delay = me.get('autocastDelay')
     delay ?= 5000
-    if @levelID in ['brawlwood', 'brawlwood-tutorial', 'dungeon-arena', 'dungeon-arena-tutorial', 'gold-rush', 'greed']
+    unless @levelID in ['rescue-mission', 'grab-the-mushroom', 'drink-me', 'its-a-trap', 'break-the-prison', 'taunt', 'cowardly-taunt', 'commanding-followers', 'mobile-artillery']
       delay = 90019001
     @setAutocastDelay delay
 
@@ -46,7 +46,7 @@ module.exports = class CastButtonView extends View
     Backbone.Mediator.publish 'tome:manual-cast', {}
 
   onCastOptionsClick: (e) =>
-    Backbone.Mediator.publish 'focus-editor'
+    Backbone.Mediator.publish 'tome:focus-editor'
     @castButtonGroup.removeClass 'open'
     @setAutocastDelay $(e.target).attr 'data-delay'
     false
@@ -97,7 +97,7 @@ module.exports = class CastButtonView extends View
     return unless delay
     @autocastDelay = delay = parseInt delay
     me.set('autocastDelay', delay)
-    me.save()
+    me.patch()
     spell.view.setAutocastDelay delay for spellKey, spell of @spells
     @castOptions.find('a').each ->
       $(@).toggleClass('selected', parseInt($(@).attr('data-delay')) is delay)

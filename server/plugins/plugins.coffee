@@ -1,12 +1,30 @@
 mongoose = require('mongoose')
-User = require('../users/User')
 textSearch = require('mongoose-text-search')
+log = require 'winston'
+
+module.exports.MigrationPlugin = (schema, migrations) ->
+  # Property name migrations made EZ
+  # This is for just when you want one property to be named differently
+
+  # 1. Change the schema and the client/server logic to use the new name
+  # 2. Add this plugin to the target models, passing in a dictionary of old/new names.
+  # 3. Check that tests still run, deploy to production.
+  # 4. Run db.<collection>.update({}, { $rename: {'<oldname>':'<newname>'} }, { multi: true }) on the server
+  # 5. Remove the names you added to the migrations dictionaries for the next deploy
+
+  schema.post 'init', ->
+    for oldKey in _.keys migrations
+      val = @get oldKey
+      @set oldKey, undefined
+      continue if val is undefined
+      newKey = migrations[oldKey]
+      @set newKey, val
 
 module.exports.PatchablePlugin = (schema) ->
   schema.is_patchable = true
   schema.index({'target.original':1, 'status':'1', 'created':-1})
   
-RESERVED_NAMES = ['search', 'names']
+RESERVED_NAMES = ['names']
 
 module.exports.NamedPlugin = (schema) ->
   schema.uses_coco_names = true
@@ -238,6 +256,17 @@ module.exports.VersionedPlugin = (schema) ->
         done(null, new Model(newObject))
       )
     )
+
+  # Assume ever save is a new version, hence an edit
+  schema.pre 'save', (next) ->
+    User = require '../users/User'  # Avoid mutual inclusion cycles
+    userID = @get('creator')?.toHexString()
+    return next() unless userID?
+
+    statName = User.statsMapping.edits[@constructor.modelName]
+    User.incrementStat userID, statName
+
+    next()
 
 
 module.exports.SearchablePlugin = (schema, options) ->

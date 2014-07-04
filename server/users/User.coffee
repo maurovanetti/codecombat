@@ -30,6 +30,17 @@ UserSchema.methods.isAdmin = ->
   p = @get('permissions')
   return p and 'admin' in p
 
+UserSchema.methods.trackActivity = (activityName, increment) ->
+  now = new Date()
+  increment ?= parseInt increment or 1
+  increment = Math.max increment, 0
+  activity = @get('activity') ? {}
+  activity[activityName] ?= {first: now, count: 0}
+  activity[activityName].count += increment
+  activity[activityName].last = now
+  @set 'activity', activity
+  activity
+
 emailNameMap =
   generalNews: 'announcement'
   adventurerNews: 'tester'
@@ -98,6 +109,32 @@ UserSchema.statics.updateMailChimp = (doc, callback) ->
 
   mc?.lists.subscribe params, onSuccess, onFailure
 
+UserSchema.statics.statsMapping =
+  edits:
+    article: 'stats.articleEdits'
+    level: 'stats.levelEdits'
+    'level.component': 'stats.levelComponentEdits'
+    'level.system': 'stats.levelSystemEdits'
+    'thang.type': 'stats.thangTypeEdits'
+  translations:
+    article: 'stats.articleTranslationPatches'
+    level: 'stats.levelTranslationPatches'
+    'level.component': 'stats.levelComponentTranslationPatches'
+    'level.system': 'stats.levelSystemTranslationPatches'
+    'thang.type': 'stats.thangTypeTranslationPatches'
+  misc:
+    article: 'stats.articleMiscPatches'
+    level: 'stats.levelMiscPatches'
+    'level.component': 'stats.levelComponentMiscPatches'
+    'level.system': 'stats.levelSystemMiscPatches'
+    'thang.type': 'stats.thangTypeMiscPatches'
+    
+
+UserSchema.statics.incrementStat = (id, statName, done, inc=1) ->
+  update = $inc: {}
+  update.$inc[statName] = inc
+  @update {_id:id}, update, {}, (err) ->
+    done err if done?
 
 UserSchema.pre('save', (next) ->
   @set('emailLower', @get('email')?.toLowerCase())
@@ -128,3 +165,6 @@ UserSchema.statics.hashPassword = (password) ->
   shasum.digest('hex')
 
 module.exports = User = mongoose.model('User', UserSchema)
+
+AchievablePlugin = require '../plugins/achievements'
+UserSchema.plugin(AchievablePlugin)

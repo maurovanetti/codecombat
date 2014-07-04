@@ -1,7 +1,7 @@
 View = require 'views/kinds/RootView'
-ErrorView = require '../../error_view'
 template = require 'templates/editor/achievement/edit'
 Achievement = require 'models/Achievement'
+ConfirmModal = require 'views/modal/confirm'
 
 module.exports = class AchievementEditView extends View
   id: "editor-achievement-edit-view"
@@ -10,13 +10,13 @@ module.exports = class AchievementEditView extends View
 
   events:
     'click #save-button': 'saveAchievement'
+    'click #recalculate-button': 'confirmRecalculation'
 
   subscriptions:
     'save-new': 'saveAchievement'
 
   constructor: (options, @achievementID) ->
     super options
-    console.log @achievementID
     @achievement = new Achievement(_id: @achievementID)
     @achievement.saveBackups = true
 
@@ -49,14 +49,37 @@ module.exports = class AchievementEditView extends View
 
     @treema.build()
 
-  pushChangesToPreview: =>
-    'TODO' # TODO might want some intrinsic preview thing
-
   getRenderData: (context={}) ->
     context = super(context)
     context.achievement = @achievement
     context.authorized = me.isAdmin()
     context
+
+  afterRender: ->
+    super(arguments...)
+    @pushChangesToPreview()
+
+  pushChangesToPreview: =>
+    $('.notifyjs-wrapper').trigger 'notify-hide'
+
+    if @treema?
+      for key, value of @treema.data
+        @achievement.set key, value
+
+    earned =
+      earnedPoints: @achievement.get 'worth'
+
+    data = @createNotifyData @achievement, earned
+    options =
+      style: 'achievement'
+      autoHide: false
+      clickToHide: false
+      arrowShow: false
+      elementPosition: 'bottom center'
+      hideDuration: 0
+      showDuration: 0
+
+    $('#achievement-view-inner').notify data, options
 
   openSaveModal: ->
     'Maybe later' # TODO
@@ -68,9 +91,40 @@ module.exports = class AchievementEditView extends View
 
     res = @achievement.save()
 
-    res.error =>
-      console.log 'Failed to save achievement'
+    res.error (collection, response, options) =>
+      console.error response
 
     res.success =>
       url = "/editor/achievement/#{@achievement.get('slug') or @achievement.id}"
       document.location.href = url
+
+  confirmRecalculation: (e) ->
+    renderData =
+      'confirmTitle': "Are you really sure?"
+      'confirmBody': "This will trigger recalculation of the achievement for all users. Are you really sure you want to go down this path?"
+      'confirmDecline': "Not really"
+      'confirmConfirm': "Definitely"
+
+    confirmModal = new ConfirmModal(renderData)
+    confirmModal.onConfirm @recalculateAchievement
+    @openModalView confirmModal
+
+  recalculateAchievement: =>
+    $.ajax
+      data: JSON.stringify(achievements: [@achievement.get('slug') or @achievement.get('_id')])
+      success: (data, status, jqXHR) ->
+        noty
+          timeout: 5000
+          text: 'Recalculation process started'
+          type: 'success'
+          layout: 'topCenter'
+      error: (jqXHR, status, error) ->
+        console.error jqXHR
+        noty
+          timeout: 5000
+          text: "Starting recalculation process failed with error code #{jqXHR.status}"
+          type: 'error'
+          layout: 'topCenter'
+      url: '/admin/earned.achievement/recalculate'
+      type: 'POST'
+      contentType: 'application/json'
