@@ -21,7 +21,7 @@ componentOriginals =
   "physics.Physical"          : "524b75ad7fc0f6d519000001"
 
 class ThangTypeSearchCollection extends CocoCollection
-  url: '/db/thang.type/search?project=original,name,version,slug,kind,components'
+  url: '/db/thang.type?project=original,name,version,slug,kind,components'
   model: ThangType
 
 module.exports = class ThangsTabView extends View
@@ -186,6 +186,7 @@ module.exports = class ThangsTabView extends View
 
   onStageMouseUp: (e) ->
     if @addThangSprite
+      @surface.camera.lock()
       # If we click on the background, we need to add @addThangSprite, but not if onSpriteMouseUp will fire.
       @backgroundAddClickTimeout = _.defer => @onExtantThangSelected {}
     $('#contextmenu').hide()
@@ -194,7 +195,7 @@ module.exports = class ThangsTabView extends View
     return unless @selectedExtantThang and e.thang?.id is @selectedExtantThang?.id
     @surface.camera.dragDisabled = true
     {stageX, stageY} = e.originalEvent
-    wop = @surface.camera.canvasToWorld x: stageX, y: stageY
+    wop = @surface.camera.screenToWorld x: stageX, y: stageY
     wop.z = @selectedExtantThang.depth / 2
     @adjustThangPos @selectedExtantSprite, @selectedExtantThang, wop
     [w, h] = [@surface.camera.canvasWidth, @surface.camera.canvasHeight]
@@ -202,7 +203,8 @@ module.exports = class ThangsTabView extends View
 
   onSpriteMouseUp: (e) ->
     clearTimeout @backgroundAddClickTimeout
-    if e.originalEvent.nativeEvent.button == 2
+    @surface.camera.unlock()
+    if e.originalEvent.nativeEvent.button == 2 and @selectedExtantThang
       @onSpriteContextMenu e
     clearInterval(@movementInterval) if @movementInterval?
     @movementInterval = null
@@ -250,7 +252,7 @@ module.exports = class ThangsTabView extends View
 #      @thangsTreema.deselectAll()
 
   selectAddThang: (e) =>
-    return if $(e.target).closest('#thang-search').length # Ignore if you're trying to search thangs
+    return if e? and $(e.target).closest('#thang-search').length # Ignore if you're trying to search thangs
     return unless e? and $(e.target).closest('#editor-level-thangs-tab-view').length or key.isPressed('esc')
     if e then target = $(e.target) else target = @$el.find('.add-thangs-palette')  # pretend to click on background if no event
     return true if target.attr('id') is 'surface'
@@ -259,7 +261,7 @@ module.exports = class ThangsTabView extends View
     @$el.find('.add-thangs-palette .add-thang-palette-icon.selected').removeClass('selected')
     @selectAddThangType(if wasSelected then null else target.attr 'data-thang-type') unless key.alt or key.meta
     target.addClass('selected') if @addThangType
-    false
+    #false # was causing #1099, any reason to keep?
 
   moveAddThangSelection: (direction) ->
     return unless @addThangType
@@ -276,7 +278,6 @@ module.exports = class ThangsTabView extends View
     @surface.spriteBoss.removeSprite @addThangSprite if @addThangSprite
     @addThangType = type
     if @addThangType
-      @surface.camera.lock()
       thang = @createAddThang()
       @addThangSprite = @surface.spriteBoss.addThangToSprites thang, @surface.spriteBoss.spriteLayers["Floating"]
       @addThangSprite.notOfThisWorld = true
@@ -285,7 +286,6 @@ module.exports = class ThangsTabView extends View
       pos ?= x: Math.round(@world.width / 2), y: Math.round(@world.height / 2)
       @adjustThangPos @addThangSprite, thang, pos
     else
-      @surface.camera.unlock()
       @addThangSprite = null
 
   createEssentialComponents: ->
@@ -320,7 +320,7 @@ module.exports = class ThangsTabView extends View
 
   onSurfaceMouseMoved: (e) ->
     return unless @addThangSprite
-    wop = @surface.camera.canvasToWorld x: e.x, y: e.y
+    wop = @surface.camera.screenToWorld x: e.x, y: e.y
     wop.z = 0.5
     @adjustThangPos @addThangSprite, @addThangSprite.thang, wop
     null

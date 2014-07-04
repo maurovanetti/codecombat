@@ -1,4 +1,4 @@
-SystemNameLoader = require 'lib/SystemNameLoader'
+SystemNameLoader = require './SystemNameLoader'
 ### 
   Good-to-knows:
     dataPath: an array of keys that walks you up a JSON object that's being patched
@@ -10,9 +10,9 @@ SystemNameLoader = require 'lib/SystemNameLoader'
 module.exports.expandDelta = (delta, left, schema) ->
   flattenedDeltas = flattenDelta(delta)
   (expandFlattenedDelta(fd, left, schema) for fd in flattenedDeltas)
-  
 
-flattenDelta = (delta, dataPath=null, deltaPath=null) ->
+
+module.exports.flattenDelta = flattenDelta = (delta, dataPath=null, deltaPath=null) ->
   # takes a single jsondiffpatch delta and returns an array of objects with
   return [] unless delta
   dataPath ?= []
@@ -27,7 +27,6 @@ flattenDelta = (delta, dataPath=null, deltaPath=null) ->
     results = results.concat flattenDelta(
       childDelta, dataPath.concat([dataIndex]), deltaPath.concat([deltaIndex]))
   results
-  
 
 expandFlattenedDelta = (delta, left, schema) ->
   # takes a single flattened delta and converts into an object that can be
@@ -93,7 +92,7 @@ module.exports.makeJSONDiffer = ->
   jsondiffpatch.create({objectHash:hasher})
     
 module.exports.getConflicts = (headDeltas, pendingDeltas) ->
-  # headDeltas and pendingDeltas should be lists of deltas returned by interpretDelta
+  # headDeltas and pendingDeltas should be lists of deltas returned by expandDelta
   # Returns a list of conflict objects with properties:
   #   headDelta
   #   pendingDelta
@@ -105,20 +104,33 @@ module.exports.getConflicts = (headDeltas, pendingDeltas) ->
   
   # Here's my thinking: conflicts happen when one delta path is a substring of another delta path
   # So, sort paths from both deltas together, which will naturally make conflicts adjacent,
-  # and if one is identified, one path is from the headDeltas, the other is from pendingDeltas
+  # and if one is identified AND one path is from the headDeltas AND the other is from pendingDeltas
   # This is all to avoid an O(nm) brute force search.
   
   conflicts = []
   paths.sort()
   for path, i in paths
-    continue if i + 1 is paths.length
-    nextPath = paths[i+1]
-    if nextPath.startsWith path
-      headDelta = (headPathMap[path] or headPathMap[nextPath])[0].delta
-      pendingDelta = (pendingPathMap[path] or pendingPathMap[nextPath])[0].delta
-      conflicts.push({headDelta:headDelta, pendingDelta:pendingDelta})
-      pendingDelta.conflict = headDelta
-      headDelta.conflict = pendingDelta
+    offset = 1
+    while i + offset < paths.length
+      # Look at the neighbor
+      nextPath = paths[i+offset]
+      offset += 1
+      
+      # these stop being substrings of each other? Then conflict DNE
+      if not (nextPath.startsWith path) then break
+        
+      # check if these two are from the same group, but we still need to check for more beyond
+      unless headPathMap[path] or headPathMap[nextPath] then continue
+      unless pendingPathMap[path] or pendingPathMap[nextPath] then continue
+
+      # Okay, we found two deltas from different groups which conflict
+      for headMetaDelta in (headPathMap[path] or headPathMap[nextPath])
+        headDelta = headMetaDelta.delta
+        for pendingMetaDelta in (pendingPathMap[path] or pendingPathMap[nextPath])
+          pendingDelta = pendingMetaDelta.delta
+          conflicts.push({headDelta:headDelta, pendingDelta:pendingDelta})
+          pendingDelta.conflict = headDelta
+          headDelta.conflict = pendingDelta
 
   return conflicts if conflicts.length
   
@@ -126,12 +138,13 @@ groupDeltasByAffectingPaths = (deltas) ->
   metaDeltas = []
   for delta in deltas
     conflictPaths = []
+    # We're being fairly liberal with what's a conflict, because the alternative is worse
     if delta.action is 'moved-index'
-      # every other action affects just the data path, but moved indexes affect a swath
-      indices = [delta.originalIndex, delta.destinationIndex]
-      indices.sort()
-      for index in _.range(indices[0], indices[1]+1)
-        conflictPaths.push delta.dataPath.slice(0, delta.dataPath.length-1).concat(index)
+      # If you moved items around in an array, mark the whole array as a gonner
+      conflictPaths.push delta.dataPath.slice(0, delta.dataPath.length-1)
+    else if delta.action in ['deleted', 'added'] and _.isNumber(delta.dataPath[delta.dataPath.length-1])
+      # If you remove or add items in an array, mark the whole thing as a gonner
+      conflictPaths.push delta.dataPath.slice(0, delta.dataPath.length-1)
     else
       conflictPaths.push delta.dataPath
     for path in conflictPaths
@@ -141,31 +154,17 @@ groupDeltasByAffectingPaths = (deltas) ->
       }
   
   map = _.groupBy metaDeltas, 'path'
-
-  # Turns out there are cases where a single delta can include paths
-  # that 'conflict' with each other, ie one is a substring of the other
-  # because of moved indices. To handle this case, go through and prune
-  # out all deeper paths that conflict with more shallow paths, so
-  # getConflicts path checking works properly.
-
-  paths = _.keys(map)
-  return map unless paths.length
-  paths.sort()
-  prunedMap = {}
-  previousPath = paths[0]
-  for path, i in paths
-    continue if i is 0
-    continue if path.startsWith previousPath
-    prunedMap[path] = map[path]
-    previousPath = path
-  
-  prunedMap
+  return map
   
 module.exports.pruneConflictsFromDelta = (delta, conflicts) ->
+  expandedDeltas = (conflict.pendingDelta for conflict in conflicts)
+  module.exports.pruneExpandedDeltasFromDelta delta, expandedDeltas
+    
+module.exports.pruneExpandedDeltasFromDelta = (delta, expandedDeltas) ->
   # the jsondiffpatch delta mustn't include any dangling nodes,
   # or else things will get removed which shouldn't be, or errors will occur
-  for conflict in conflicts
-    prunePath delta, conflict.pendingDelta.deltaPath
+  for expandedDelta in expandedDeltas
+    prunePath delta, expandedDelta.deltaPath
   if _.isEmpty delta then undefined else delta
     
 prunePath = (delta, path) ->

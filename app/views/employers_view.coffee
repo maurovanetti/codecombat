@@ -2,6 +2,7 @@ View = require 'views/kinds/RootView'
 template = require 'templates/employers'
 app = require 'application'
 User = require 'models/User'
+UserRemark = require 'models/UserRemark'
 {me} = require 'lib/auth'
 CocoCollection = require 'collections/CocoCollection'
 EmployerSignupView = require 'views/modal/employer_signup_modal'
@@ -10,20 +11,30 @@ class CandidatesCollection extends CocoCollection
   url: '/db/user/x/candidates'
   model: User
 
+class UserRemarksCollection extends CocoCollection
+  url: '/db/user.remark?project=contact,contactName,user'
+  model: UserRemark
+
 module.exports = class EmployersView extends View
   id: "employers-view"
   template: template
 
   events:
     'click tbody tr': 'onCandidateClicked'
+    'change #filters input': 'onFilterChanged'
+    'click #filter-button': 'applyFilters'
+    'change #select_all_checkbox': 'handleSelectAllChange'
+    'click .get-started-button': 'openSignupModal'
+    'click .navbar-brand': 'restoreBodyColor'
+    'click #login-link': 'onClickAuthbutton'
+    'click #filter-link': 'swapFolderIcon'
 
   constructor: (options) ->
     super options
     @getCandidates()
-  checkForEmployerSignupHash: =>
-    if window.location.hash is "#employerSignupLoggingIn" and not ("employer" in me.get("permissions"))
-      @openModalView application.router.getView("modal/employer_signup","_modal")
-      window.location.hash = ""
+    @setFilterDefaults()
+    
+    
   afterRender: ->
     super()
     @sortTable() if @candidates.models.length
@@ -31,29 +42,125 @@ module.exports = class EmployersView extends View
   afterInsert: ->
     super()
     _.delay @checkForEmployerSignupHash, 500
-
+    #fairly hacky, change this in the future
+    @originalBackgroundColor = $("body").css 'background-color'
+    $("body").css 'background-color', '#B4B4B4'
+      
+  restoreBodyColor: ->
+    $("body").css 'background-color', @originalBackgroundColor
+  
+  swapFolderIcon: ->
+    $("#folder-icon").toggleClass("glyphicon-folder-close").toggleClass("glyphicon-folder-open")
+  onFilterChanged: ->
+    @resetFilters()
+    that = @
+    $("#filters :input").each ->
+      input = $(this)
+      checked = input.prop 'checked'
+      name = input.attr 'name'
+      value = input.val()
+      if name is "phoneScreenFilter"
+        value = JSON.parse(input.prop 'value')
+      if checked
+        that.filters[name] = _.union that.filters[name], [value]
+      else
+        that.filters[name] = _.difference that.filters[name], [value]
+        
+    for filterName, filterValues of @filters
+      if filterValues.length is 0
+        @filters[filterName] = @defaultFilters[filterName]
+    
+  openSignupModal: ->
+    @openModalView new EmployerSignupView
+  handleSelectAllChange: (e) ->
+    checkedState = e.currentTarget.checked
+    $("#filters :input").each ->
+      $(this).prop 'checked', checkedState
+    @onFilterChanged()
+    
+  resetFilters: ->
+    for filterName, filterValues of @filters
+      @filters[filterName] = []
+      
+  applyFilters: ->
+    candidateList = _.sortBy @candidates.models, (c) -> c.get('jobProfile').updated
+    candidateList = _.filter candidateList, (c) -> c.get('jobProfileApproved')
+    
+    filteredCandidates = candidateList
+    for filterName, filterValues of @filters
+      if filterName is "visa"
+        filteredCandidates = _.difference filteredCandidates, _.filter(filteredCandidates, (c) ->
+          fieldValue = c.get('jobProfile').visa
+          return not (_.contains filterValues, fieldValue)
+        )
+      else
+        filteredCandidates = _.difference filteredCandidates, _.filter(filteredCandidates, (c) ->
+          unless c.get('jobProfile').curated then return true
+          fieldValue = c.get('jobProfile').curated?[filterName]
+          return not (_.contains filterValues, fieldValue)
+        )
+    candidateIDsToShow = _.pluck filteredCandidates, 'id'
+    $("#candidate-table tr").each -> $(this).hide()
+    candidateIDsToShow.forEach (id) ->
+      $("[data-candidate-id=#{id}]").show()
+    $("#results").text(candidateIDsToShow.length + " results")
+    
+      
+    return filteredCandidates
+  setFilterDefaults: ->
+    @filters = 
+      phoneScreenFilter: [true, false]
+      visa: ['Authorized to work in the US', 'Need visa sponsorship']
+      schoolFilter: ['Top 20 Eng.', 'Other US', 'Other Intl.']
+      locationFilter: ['Bay Area', 'New York', 'Other US', 'International']
+      roleFilter: ['Web Developer', 'Software Developer', 'iOS Developer', 'Android Developer', 'Project Manager']
+      seniorityFilter: ['College Student', 'Recent Grad', 'Junior', 'Senior', 'Management']
+    @defaultFilters = _.cloneDeep @filters
+    
+    
   getRenderData: ->
-    c = super()
-    c.candidates = @candidates.models
-    userPermissions = me.get('permissions') ? []
+    ctx = super()
+    ctx.isEmployer = @isEmployer()
+    ctx.candidates = _.sortBy @candidates.models, (c) -> -1 * c.get('jobProfile').experience
+    ctx.activeCandidates = _.filter ctx.candidates, (c) -> c.get('jobProfile').active
+    ctx.inactiveCandidates = _.reject ctx.candidates, (c) -> c.get('jobProfile').active
+    ctx.featuredCandidates = _.filter ctx.activeCandidates, (c) -> c.get('jobProfileApproved')
+    unless @isEmployer() or me.isAdmin()
+      ctx.featuredCandidates = _.filter ctx.featuredCandidates, (c) -> c.get('jobProfile').curated
+      ctx.featuredCandidates = ctx.featuredCandidates.slice(0,7)
+    ctx.otherCandidates = _.reject ctx.activeCandidates, (c) -> c.get('jobProfileApproved')
+    ctx.remarks = {}
+    ctx.remarks[remark.get('user')] = remark for remark in @remarks.models
+    ctx.moment = moment
+    ctx._ = _
+    ctx.numberOfCandidates = ctx.featuredCandidates.length
+    ctx
 
-    c.isEmployer = _.contains userPermissions, "employer"
-    c.moment = moment
-    c
+  isEmployer: ->
+    userPermissions = me.get('permissions') ? []
+    _.contains userPermissions, "employer"
 
   getCandidates: ->
     @candidates = new CandidatesCollection()
     @candidates.fetch()
+    @remarks = new UserRemarksCollection()
+    @remarks.fetch()
     # Re-render when we have fetched them, but don't wait and show a progress bar while loading.
     @listenToOnce @candidates, 'all', @renderCandidatesAndSetupScrolling
+    @listenToOnce @remarks, 'all', @renderCandidatesAndSetupScrolling
 
   renderCandidatesAndSetupScrolling: =>
     @render()
     $(".nano").nanoScroller()
-    if window.history?.state?.lastViewedCandidateID
-      $(".nano").nanoScroller({scrollTo:$("#" + window.history.state.lastViewedCandidateID)})
-    else if window.location.hash.length is 25
-      $(".nano").nanoScroller({scrollTo:$(window.location.hash)})
+    #if window.history?.state?.lastViewedCandidateID
+    #  $(".nano").nanoScroller({scrollTo:$("#" + window.history.state.lastViewedCandidateID)})
+    #else if window.location.hash.length is 25
+    #  $(".nano").nanoScroller({scrollTo:$(window.location.hash)})
+
+  checkForEmployerSignupHash: =>
+    if window.location.hash is "#employerSignupLoggingIn" and not ("employer" in me.get("permissions"))
+      @openModalView application.router.getView("modal/employer_signup","_modal")
+      window.location.hash = ""
 
   sortTable: ->
     # http://mottie.github.io/tablesorter/docs/example-widget-bootstrap-theme.html
@@ -94,6 +201,7 @@ module.exports = class EmployersView extends View
           for s in [a, b]
             n = parseInt s
             n = 0 unless _.isNumber n
+            n = 1 if /^a/.test s
             for [duration, factor] in [
               [/second/i, 1 / (86400 * 1000)]
               [/minute/i, 1 / 1440]
@@ -109,7 +217,7 @@ module.exports = class EmployersView extends View
               n *= -1
             days.push n
           days[0] - days[1]
-      sortList: [[6, 0]]
+      sortList: if @isEmployer() or me.isAdmin() then [[6, 0]] else [[0, 1]]
       # widget code contained in the jquery.tablesorter.widgets.js file
       # use the zebra stripe widget if you plan on hiding any rows (filter widget)
       widgets: ["uitheme", "zebra", "filter"]
@@ -168,21 +276,18 @@ module.exports = class EmployersView extends View
             "Last 4 weeks": (e, n, f, i, $r) ->
               days = parseFloat $($r.find('td')[i]).data('profile-age')
               days <= 28
-          7:
-            "✓": filterSelectExactMatch
-            "✗": filterSelectExactMatch
           8:
             "✓": filterSelectExactMatch
             "✗": filterSelectExactMatch
 
   onCandidateClicked: (e) ->
     id = $(e.target).closest('tr').data('candidate-id')
-    if id
+    if id and (@isEmployer() or me.isAdmin())
       if window.history
         oldState = _.cloneDeep window.history.state ? {}
         oldState["lastViewedCandidateID"] = id
         window.history.replaceState(oldState,"")
-      else  
+      else
         window.location.hash = id
       url = "/account/profile/#{id}"
       window.open url,"_blank"

@@ -6,26 +6,33 @@ Aether = require "aether"
 async = require 'async'
 
 serverSetup = require '../server_setup'
-Level = require '../server/levels/Level.coffee'
-LevelSession = require '../server/levels/sessions/LevelSession.coffee'
+Level = require '../server/levels/Level'
+LevelSession = require '../server/levels/sessions/LevelSession'
 
 Aether.addGlobal 'Vector', require '../app/lib/world/vector'
 Aether.addGlobal '_', _
-
+i = 0
 transpileLevelSession = (sessionID, cb) ->
-  query = LevelSession.findOne("_id": sessionID).select("submittedCode").lean()
+  query = LevelSession.findOne("_id": sessionID).select("team teamSpells submittedCode submittedCodeLanguage").lean()
   query.exec (err, session) ->
     if err then return cb err
     submittedCode = session.submittedCode
+    unless session.submittedCodeLanguage
+      throw "SUBMITTED CODE LANGUAGE DOESN'T EXIST"
+    else
+      console.log "Transpiling code for session #{i++} #{session._id} in language #{session.submittedCodeLanguage}"
     transpiledCode = {}
-    console.log "Updating session #{sessionID}"
+    #console.log "Updating session #{sessionID}"
     for thang, spells of submittedCode
       transpiledCode[thang] = {}
       for spellID, spell of spells
+        spellName = thang + "/" + spellID
 
+        if session.teamSpells and not (spellName in session.teamSpells[session.team]) then continue
+        #console.log "Transpiling spell #{spellName}"
         aetherOptions =
           problems: {}
-          language: "javascript"
+          language: session.submittedCodeLanguage
           functionName: spellID
           functionParameters: []
           yieldConditionally: spellID is "plan"
@@ -33,7 +40,9 @@ transpileLevelSession = (sessionID, cb) ->
           protectAPI: true
           includeFlow: false
           executionLimit: 1 * 1000 * 1000
-        if spellID is "hear" then aetherOptions["functionParameters"] = ["speaker","message","data"]
+        if spellID is "hear" then aetherOptions.functionParameters = ["speaker","message","data"]
+        if spellID is "makeBid" then aetherOptions.functionParameters = ["tileGroupLetter"]
+        if spellID is "findCentroids" then aetherOptions.functionParameters = ["centroids"]
 
         aether = new Aether aetherOptions
         transpiledCode[thang][spellID] = aether.transpile spell
@@ -41,7 +50,6 @@ transpileLevelSession = (sessionID, cb) ->
       "_id": sessionID
     update =
       "transpiledCode": transpiledCode
-      "submittedCodeLanguage": "javascript"
     query = LevelSession.update(conditions,update)
 
     query.exec (err, numUpdated) -> cb err
@@ -59,7 +67,7 @@ findLadderLevelSessions = (levelID, cb) ->
     levelSessionIDs = _.pluck levelSessions, "_id"
     async.eachSeries levelSessionIDs, transpileLevelSession, (err) ->
       if err then return cb err
-      cb null
+      return cb null
 
 
 transpileLadderSessions = ->
@@ -78,3 +86,5 @@ transpileLadderSessions = ->
 
 serverSetup.connectToDatabase()
 transpileLadderSessions()
+# 2014-06-21: took about an hour to do 5480 sessions, ~93/min
+# eta: db.level.sessions.find({submitted: true}).count() / 93

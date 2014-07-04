@@ -69,9 +69,40 @@ module.exports.i18n = (say, target, language=me.lang(), fallback='en') ->
   null
 
 module.exports.getByPath = (target, path) ->
+  throw new Error 'Expected an object to match a query against, instead got null' unless target
   pieces = path.split('.')
   obj = target
   for piece in pieces
     return undefined unless piece of obj
     obj = obj[piece]
   obj
+
+module.exports.round = _.curry (digits, n) ->
+  n = +n.toFixed(digits)
+
+positify = (func) -> (params) -> (x) -> if x > 0 then func(params)(x) else 0
+
+# f(x) = ax + b
+createLinearFunc = (params) ->
+  (x) -> (params.a or 1) * x + (params.b or 0)
+
+# f(x) = ax² + bx + c
+createQuadraticFunc = (params) ->
+  (x) -> (params.a or 1) * x * x + (params.b or 1) * x + (params.c or 0)
+
+# f(x) = a log(b (x + c)) + d
+createLogFunc = (params) ->
+  (x) -> if x > 0 then (params.a or 1) * Math.log((params.b or 1) * (x + (params.c or 0))) + (params.d or 0) else 0
+
+module.exports.functionCreators =
+  linear: positify(createLinearFunc)
+  quadratic: positify(createQuadraticFunc)
+  logarithmic: positify(createLogFunc)
+
+# Call done with true to satisfy the 'until' goal and stop repeating func
+module.exports.keepDoingUntil = (func, wait=100, totalWait=5000) ->
+  waitSoFar = 0
+  (done = (success) ->
+    if (waitSoFar += wait) <= totalWait && not success
+      _.delay (-> func done), wait) false
+
