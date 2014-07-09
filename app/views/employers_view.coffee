@@ -27,6 +27,7 @@ module.exports = class EmployersView extends View
     'click .get-started-button': 'openSignupModal'
     'click .navbar-brand': 'restoreBodyColor'
     'click #login-link': 'onClickAuthbutton'
+    'click #filter-link': 'swapFolderIcon'
 
   constructor: (options) ->
     super options
@@ -47,7 +48,9 @@ module.exports = class EmployersView extends View
       
   restoreBodyColor: ->
     $("body").css 'background-color', @originalBackgroundColor
-    
+  
+  swapFolderIcon: ->
+    $("#folder-icon").toggleClass("glyphicon-folder-close").toggleClass("glyphicon-folder-open")
   onFilterChanged: ->
     @resetFilters()
     that = @
@@ -100,6 +103,7 @@ module.exports = class EmployersView extends View
     $("#candidate-table tr").each -> $(this).hide()
     candidateIDsToShow.forEach (id) ->
       $("[data-candidate-id=#{id}]").show()
+    $("#results").text(candidateIDsToShow.length + " results")
     
       
     return filteredCandidates
@@ -117,7 +121,7 @@ module.exports = class EmployersView extends View
   getRenderData: ->
     ctx = super()
     ctx.isEmployer = @isEmployer()
-    ctx.candidates = _.sortBy @candidates.models, (c) -> c.get('jobProfile').updated
+    ctx.candidates = _.sortBy @candidates.models, (c) -> -1 * c.get('jobProfile').experience
     ctx.activeCandidates = _.filter ctx.candidates, (c) -> c.get('jobProfile').active
     ctx.inactiveCandidates = _.reject ctx.candidates, (c) -> c.get('jobProfile').active
     ctx.featuredCandidates = _.filter ctx.activeCandidates, (c) -> c.get('jobProfileApproved')
@@ -129,6 +133,7 @@ module.exports = class EmployersView extends View
     ctx.remarks[remark.get('user')] = remark for remark in @remarks.models
     ctx.moment = moment
     ctx._ = _
+    ctx.numberOfCandidates = ctx.featuredCandidates.length
     ctx
 
   isEmployer: ->
@@ -147,10 +152,10 @@ module.exports = class EmployersView extends View
   renderCandidatesAndSetupScrolling: =>
     @render()
     $(".nano").nanoScroller()
-    if window.history?.state?.lastViewedCandidateID
-      $(".nano").nanoScroller({scrollTo:$("#" + window.history.state.lastViewedCandidateID)})
-    else if window.location.hash.length is 25
-      $(".nano").nanoScroller({scrollTo:$(window.location.hash)})
+    #if window.history?.state?.lastViewedCandidateID
+    #  $(".nano").nanoScroller({scrollTo:$("#" + window.history.state.lastViewedCandidateID)})
+    #else if window.location.hash.length is 25
+    #  $(".nano").nanoScroller({scrollTo:$(window.location.hash)})
 
   checkForEmployerSignupHash: =>
     if window.location.hash is "#employerSignupLoggingIn" and not ("employer" in me.get("permissions"))
