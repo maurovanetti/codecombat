@@ -281,7 +281,7 @@
     education_duration_help: "When?"
     education_description: "Description"
     education_description_help: "Highlight anything about this educational experience. (140 chars; optional)"
-    our_notes: "Our Notes"
+    our_notes: "CodeCombat's Notes"
     remarks: "Remarks"
     projects: "Projects"
     projects_header: "Add 3 projects"
